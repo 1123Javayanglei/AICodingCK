@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>smoke4</title></head>
+<body>
+<div class="app" id="app"></div>
+<script>window.confirm=function(){return true;};window.alert=function(){};</script>
+<script src="../questions.js"></script>
+<script src="../dict.js"></script>
+<script src="../app.js"></script>
+<pre id="out"></pre>
+<script>
+(function () {
+  var log = [], fails = 0;
+  function say(s) { log.push(s); document.getElementById('out').textContent = log.join('\n'); }
+  function check(name, cond, extra) {
+    if (!cond) fails++;
+    say((cond ? '  PASS  ' : '  FAIL  ') + name + (extra ? '  [' + extra + ']' : ''));
+  }
+  function q(sel) { return document.querySelector(sel); }
+  var all = window.QUESTION_BANKS.english.questions;
+  // 分节名会在题型之间重名 (单选题和阅读理解都有"练习一"), 键用"题型/分节"
+  var SEC = {};
+  (function () {
+    var b = window.QUESTION_BANKS.english;
+    b.sections.forEach(function (s) {
+      var t = b.types.filter(function (x) { return x.id === s.type; })[0];
+      SEC[(t ? t.name : s.type) + '/' + s.name] = s.id;
+    });
+  })();
+  function curQ() {
+    var m = (q('.qmeta') || {}).textContent.match(/(\S+) · (练习\S+?) · 第 (\d+) 题/);
+    return m ? (all.filter(function (x) { return SEC[m[1] + '/' + m[2]] === x.section && x.no === parseInt(m[3], 10); })[0] || null) : null;
+  }
+  function total() { return parseInt(q('.progress-wrap span').textContent.match(/\/ (\d+)/)[1], 10); }
+  function doAll(correct) {
+    var n = total();
+    for (var i = 0; i < n; i++) {
+      var cur = curQ();
+      q('[data-action="pick"][data-opt="' + (correct ? cur.answer : (cur.answer + 1) % 4) + '"]').click();
+      if (i === n - 1) break;
+      var nx = q('[data-action="next"]:not([disabled])'); if (nx) nx.click();
+    }
+  }
+  function run() {
+    // ---- 考试: 20 对 / 18 错 / 2 空 ----
+    q('[data-action="start-exam"]').click();
+    for (var i = 0; i < 38; i++) {
+      var cur = curQ();
+      q('[data-action="pick"][data-opt="' + (i < 20 ? cur.answer : (cur.answer + 1) % 4) + '"]').click();
+      var nx = q('[data-action="next"]:not([disabled])'); if (nx) nx.click();
+    }
+    q('[data-action="submit-exam"]').click();
+    check('考试得分 = 20', q('.score-num').textContent === '20 分', q('.score-num').textContent);
+    check('正确/错误/未答统计', [].map.call(document.querySelectorAll('.score-detail b'), function(b){return b.textContent;}).join('/') === '20/18/2');
+    check('默认只看错题 (20条)', document.querySelectorAll('.review-item').length === 20);
+    q('[data-action="toggle-wrong-only"]').click();
+    check('切换后显示全部 (40条)', document.querySelectorAll('.review-item').length === 40);
+
+    q('[data-action="home"]').click();
+    check('错题本含未答 2 题 = 20', q('[data-action="open-wrongbook"]').querySelector('.t').textContent === '错题本 · 20 题', q('[data-action="open-wrongbook"]').querySelector('.t').textContent);
+    check('历史记录 1 条', document.querySelectorAll('.history-item').length === 1);
+
+    // ---- 重做错题全对 -> 错题本清空 ----
+    q('[data-action="open-wrongbook"]').click();
+    check('错题本列出 20 题', document.querySelectorAll('.review-item').length === 20);
+    check('未答题显示"未作答"', q('.review-item .review-line b.bad').textContent.length > 0);
+    q('[data-action="redo-wrong"]').click();
+    doAll(true);
+    check('答完后出现完成按钮', !!q('[data-action="finish-practice"]'));
+    q('[data-action="finish-practice"]').click();
+    check('重做结果 100%', q('.score-sub').textContent.indexOf('100%') > -1, q('.score-sub').textContent);
+    q('[data-action="home"]').click();
+    check('错题本已清空', q('[data-action="open-wrongbook"]').querySelector('.t').textContent === '错题本 · 0 题');
+
+    // ---- 练习模式分节 ----
+    q('[data-action="goto-practice"]').click();
+    var btn = document.querySelectorAll('[data-action="start-practice"]')[1];
+    btn.click();
+    check('练习一 6 题', total() === 6, String(total()));
+    var c0 = curQ();
+    q('[data-action="pick"][data-opt="' + ((c0.answer + 1) % 4) + '"]').click();
+    check('即时反馈(错误)', q('.feedback').className.indexOf('no') > -1, q('.feedback').textContent);
+    check('正确项标绿', document.querySelectorAll('.option.correct').length === 1);
+    check('错选项标红', document.querySelectorAll('.option.wrong').length === 1);
+    check('选项锁定', document.querySelectorAll('.option[disabled]').length === 4);
+    check('练习模式无答题卡', document.querySelectorAll('.navigator').length === 0);
+    q('[data-action="exit-session"]').click();
+    check('练习错题入本 (1题)', q('[data-action="open-wrongbook"]').querySelector('.t').textContent === '错题本 · 1 题');
+
+    // ---- 键盘作答 ----
+    if (q('[data-action="exit-session"]')) q('[data-action="exit-session"]').click();
+    if (q('[data-action="home"]')) q('[data-action="home"]').click();
+    q('[data-action="start-exam"]').click();
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', bubbles: true }));
+    check('键盘 C 选中选项', document.querySelectorAll('.option.chosen').length === 1);
+    check('键盘选中第3项', q('.option.chosen').getAttribute('data-opt') === '2');
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    check('方向键翻页', q('.qmeta').textContent.indexOf('第 14 题') > -1, q('.qmeta').textContent.trim());
+
+    say('');
+    say(fails === 0 ? '全部通过 ✓' : (fails + ' 项失败 ✗'));
+  }
+  window.addEventListener('load', function () { setTimeout(run, 50); });
+})();
+</script>
+</body></html>

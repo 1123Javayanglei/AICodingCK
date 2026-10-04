@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>作文功能测试</title>
+<link rel="stylesheet" href="../styles.css">
+<script>try { localStorage.clear(); } catch (e) {}</script>
+</head>
+<body>
+<div class="app" id="app"></div>
+<script src="../questions.js"></script>
+<script src="../explanations.js"></script>
+<script src="../essay-rubrics.js"></script>
+<script src="../dict.js"></script>
+<script src="../app.js"></script>
+<script>
+(function () {
+  const out = [];
+  let pass = 0, fail = 0;
+  function ok(cond, name, extra) {
+    if (cond) { pass++; out.push('PASS  ' + name); }
+    else { fail++; out.push('FAIL  ' + name + (extra != null ? '  → ' + extra : '')); }
+  }
+  function q(sel) { return document.querySelector(sel); }
+  function qa(sel) { return Array.prototype.slice.call(document.querySelectorAll(sel)); }
+  function txt(sel) { const el = q(sel); return el ? el.textContent : null; }
+  function stat(i) { const els = qa('.stat b'); return els[i] ? els[i].textContent : null; }
+  function click(sel) { const el = q(sel); if (!el) throw new Error('找不到元素: ' + sel); el.click(); }
+  function type(text) {
+    const ta = q('#essay-input');
+    if (!ta) throw new Error('找不到作文输入框');
+    ta.value = text;
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  function pressKey(key) {
+    const ta = q('#essay-input');
+    if (!ta) throw new Error('找不到作文输入框');
+    ta.dispatchEvent(new KeyboardEvent('keydown', { key: key, bubbles: true, cancelable: true }));
+  }
+  function progress() { return txt('.progress-wrap'); }
+  // 复选框的 label 才是显示文案的那一层
+  function optLabel(action) {
+    const cb = q('[data-action="' + action + '"]');
+    return cb && cb.closest('.mode-opt') ? cb.closest('.mode-opt').textContent : null;
+  }
+  function partScore(name) {
+    const row = qa('.essay-part').filter(function (x) {
+      return x.querySelector('.name').textContent === name;
+    })[0];
+    return row ? parseFloat(row.querySelector('.val').textContent) : NaN;
+  }
+  window.confirm = function () { return true; };
+  window.alert = function (m) { window.__alert = m; };
+
+  const GOOD = [
+    'Nowadays, with the development of the Internet and mobile devices, the media has become an important part of our daily life, and shopping through various media has become increasingly common. Many people, especially young consumers, prefer to buy goods on shopping websites or through advertisements they see on television.',
+    'Online shopping brings people a lot of convenience. For example, we can compare prices and choose from a wide variety of products without going out, which saves us much time and money. However, it also has obvious disadvantages. Because we can only see pictures instead of the real goods, the quality may be much worse than expected. Moreover, some dishonest sellers mislead consumers, and many people tend to overspend on things they do not really need. Privacy is another problem that should not be ignored.',
+    'In my opinion, shopping through the media is a double-edged sword. Although it makes our life much more convenient, we should keep a clear mind and learn to control ourselves. In conclusion, I believe that as long as consumers stay rational and the government strengthens regulation, media shopping will bring us more benefits than trouble.',
+  ].join('\n\n');
+
+  // 一篇"写得不怎么样"的作文: 字数不够、一坨没分段、连接词少
+  const BAD = 'I think shopping on the internet is very good. Many people like it because it is easy. ' +
+    'You can buy things at home and you do not need to go out in the rain. But there are some problems too. ' +
+    'The quality is not good and the picture is not the same as the real thing. I think we should be careful ' +
+    'when we buy things online. So shopping online is good and bad.';
+
+  // 第二篇的范文 —— 模拟考试是随机抽题的, 抽到哪篇就得写哪篇
+  const GOOD2 = [
+    'In recent years, an increasing number of elderly people in China choose to live alone instead of moving in with their grown-up children. This phenomenon has become common in both big cities and small towns, and it has attracted wide attention in society.',
+    'There are several reasons for this trend. For one thing, many old people value their freedom and independence, and they do not want to change the habits they have kept for decades. For another, young couples are often busy with their work, and some of them even work in another city far away from their parents. Living apart can therefore reduce the daily conflicts between the two generations.',
+    'In my opinion, we should respect the choice of the elderly. However, living alone does not mean being forgotten. Their children should visit them regularly, and the community can organize activities so that they can communicate with others. The government should also improve the nursing homes and medical services for them. In conclusion, only when the whole society pays attention to their loneliness can they enjoy a happy later life.',
+  ].join('\n\n');
+
+  function essayFor(title) {
+    return String(title).indexOf('Media') >= 0 ? GOOD : GOOD2;
+  }
+
+  // 字数够、结构齐, 但通篇在写做饭 —— 内容分必须塌下来
+  const OFF_TOPIC = [
+    'Nowadays, cooking for oneself has become more and more popular in our country. Many young people are interested in learning how to make delicious dishes for their family and friends.',
+    'There are several reasons for this change. Firstly, eating in a restaurant is expensive, and the food there often contains too much oil and salt. Secondly, preparing a meal together is a good way for family members to spend time with each other. Thirdly, more people pay attention to healthy food, so they want to control what they put into their bodies.',
+    'In my opinion, cooking is a useful skill, and everyone should learn at least a few simple dishes. In conclusion, it can make our life healthier and happier.',
+  ].join('\n\n');
+
+  try {
+    /* ---------- 1. 首页 ---------- */
+    ok(!!q('[data-action="toggle-essay"]'), '首页出现"加入写作"复选框');
+    ok(txt('.mode-card.primary .d').indexOf('满分 40 分') >= 0, '未勾选时满分 40', txt('.mode-card.primary .d'));
+    ok((optLabel('toggle-essay') || '').replace(/\s+/g, ' ').indexOf('加入写作') >= 0,
+      '复选框文案', optLabel('toggle-essay'));
+
+    click('[data-action="toggle-essay"]');
+    ok(txt('.mode-card.primary .d').indexOf('满分 60 分') >= 0, '勾选后满分 60', txt('.mode-card.primary .d'));
+    ok(txt('.mode-card.primary .d').indexOf('作文 1 篇') >= 0, '考试描述里有作文');
+
+    const pref = JSON.parse(localStorage.getItem('qb_prefs_v1') || 'null');
+    ok(!!pref && pref.withEssay === true, '作文选项记进偏好', pref && pref.withEssay);
+
+    /* ---------- 2. 练习设置 ---------- */
+    click('[data-action="goto-practice"]');
+    ok(txt('.type-head .t').indexOf('单选题') === 0, '先列出题型分组', txt('.type-head .t'));
+    const heads = qa('.type-head').map(function (x) { return x.textContent; });
+    ok(heads.length === 4, '单选题 / 阅读理解 / 单句翻译 / 写作 四个分组', heads.length);
+    ok(heads[1].indexOf('阅读理解') === 0, '第二块是阅读理解', heads[1]);
+    ok(heads[2].indexOf('单句翻译') === 0, '第三块是单句翻译', heads[2]);
+    ok(heads[3].indexOf('写作') === 0, '第四块是写作', heads[3]);
+    const subs = qa('.sub-row').map(function (x) { return x.textContent; });
+    ok(subs.length === 11, '3 + 4 + 2 个分节 + 2 篇作文', subs.length);
+    ok(subs[9].indexOf('Media and Shopping') >= 0, '作文按标题列出', subs[9]);
+    ok(subs[10].indexOf('Some Aged People') >= 0, '第二篇也在', subs[10]);
+
+    /* ---------- 3. 指定作文进入练习 ---------- */
+    click('[data-scope="essay:w1"]');
+    ok(txt('.topbar .title').indexOf('练习模式') === 0, '进入练习会话', txt('.topbar .title'));
+    ok(txt('.topbar .badge') === '作文 20 分', '标题上有作文标记', txt('.topbar .badge'));
+    ok(txt('.qmeta') === '写作 · 20 分', '题卡标注', txt('.qmeta'));
+    ok(txt('.essay-title') === 'Media and Shopping', '显示作文标题', txt('.essay-title'));
+    ok(qa('.essay-outline li').length === 3, '3 个提纲要点', qa('.essay-outline li').length);
+    ok(txt('.essay-req').indexOf('120 词') >= 0, '显示字数要求', txt('.essay-req'));
+    ok(txt('.progress-wrap span') === '作文', '进度显示"作文"', txt('.progress-wrap span'));
+    ok(!!q('#essay-input'), '有输入框');
+    ok(txt('#essay-count').indexOf('已写 0 词') === 0, '初始字数', txt('#essay-count'));
+
+    /* ---------- 3b. 范文 ---------- */
+    ok(!!q('[data-action="toggle-model"]'), '练习模式有"看范文"按钮');
+    ok(q('.essay-model').style.display === 'none', '默认折叠, 不剧透');
+    click('[data-action="toggle-model"]');
+    ok(q('.essay-model').style.display !== 'none', '点开能看到范文');
+    ok(txt('[data-action="toggle-model"]') === '收起范文', '按钮文案翻转', txt('[data-action="toggle-model"]'));
+    const modelText = qa('.essay-model p').map(function (x) { return x.textContent; }).join(' ');
+    ok(qa('.essay-model p').length === 3, '范文分 3 段, 对应 3 个提纲要点', qa('.essay-model p').length);
+    // 范文刻意避开两个最套路的段首: 开头不用 Nowadays, 结尾不用 In my opinion
+    ok(qa('.essay-model p')[0].textContent.indexOf('Nowadays') !== 0,
+      '正文不以 Nowadays 开头', qa('.essay-model p')[0].textContent.slice(0, 40));
+    ok(qa('.essay-model p')[2].textContent.indexOf('In my opinion') !== 0,
+      '末段不以 In my opinion 开头', qa('.essay-model p')[2].textContent.slice(0, 40));
+    const modelWords = parseInt(txt('.essay-model-head .d'), 10);
+    ok(modelWords >= 110 && modelWords <= 140, '范文词数贴近 120 要求', modelWords);
+    // 范文得是"初中水平": 用难词就说明写偏了
+    const HARD = ['phenomenon', 'conveniently', 'counterfeit', 'detrimental', 'nevertheless',
+      'furthermore', 'consequently', 'advocate', 'prevalent', 'substantial', 'utilize'];
+    const hitHard = HARD.filter(function (w) { return modelText.toLowerCase().indexOf(w) >= 0; });
+    ok(hitHard.length === 0, '范文没出现超纲词', hitHard.join(','));
+    // 好背: 句子要短
+    const modelSent = modelText.split(/[.!?]+/).map(function (s) { return s.trim(); })
+      .filter(function (s) { return s.split(/\s+/).length > 3; });
+    const longest = Math.max.apply(null, modelSent.map(function (s) { return s.split(/\s+/).length; }));
+    ok(longest <= 18, '范文最长句不超过 18 词, 好背', longest);
+    click('[data-action="toggle-model"]');
+    ok(q('.essay-model').style.display === 'none', '能再收起来');
+    // 收起来之后写东西, 上下文没坏
+    ok(!!q('#essay-input'), '折叠范文不影响输入框');
+
+    /* ---------- 4. 打字时快捷键不抢输入 ---------- */
+    const ta = q('#essay-input');
+    ta.value = 'a';
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    ok(txt('#essay-count').indexOf('已写 1 词') === 0, '输入实时更新字数', txt('#essay-count'));
+    pressKey('ArrowLeft');
+    ok(txt('.topbar .title').indexOf('练习模式') === 0 && !!q('#essay-input'), '在输入框里按方向键不翻页',
+      txt('.topbar .title'));
+
+    /* ---------- 5. 写得好 -> 高分 ---------- */
+    type(GOOD);
+    ok(txt('#essay-count').indexOf('✓') > 0, '写够字数后打勾', txt('#essay-count'));
+    click('[data-action="grade-essay"]');
+    ok(!!q('#essay-report'), '出现评分报告');
+    const goodParts = qa('.essay-part').map(function (x) {
+      return x.querySelector('.name').textContent + '=' + x.querySelector('.val').textContent;
+    });
+    ok(goodParts.length === 4, '四个维度都有分', goodParts.join(' | '));
+    const goodScore = parseFloat(txt('.essay-score .num'));
+    ok(goodScore >= 15, '写得完整能拿到 15 分以上', goodScore);
+    ok(txt('.essay-score .of').indexOf('20') >= 0, '满分 20', txt('.essay-score .of'));
+    ok(!!q('.essay-caveat'), '标注了这是机器估算');
+    ok(txt('.essay-stats').indexOf('段') > 0, '给出统计数字', txt('.essay-stats'));
+    const goodWords = parseInt(qa('.essay-stats b')[0].textContent, 10);
+    ok(goodWords > 150 && goodWords < 220, '词数统计合理', goodWords);
+    ok(qa('.essay-stats b')[1].textContent === '3', '识别出 3 段', qa('.essay-stats b')[1].textContent);
+    ok(qa('.essay-list').length === 0 || !q('.essay-list.err'), '好文章没有基础错误',
+      q('.essay-list.err') ? txt('.essay-list.err') : '');
+    ok(txt('[data-action="grade-essay"]') === '重新评分', '可以重新评分', txt('[data-action="grade-essay"]'));
+
+    /* ---------- 6. 改写成一坨 -> 低分 ---------- */
+    type(BAD);
+    click('[data-action="grade-essay"]');
+    const badScore = parseFloat(txt('.essay-score .num'));
+    ok(badScore < goodScore - 2, '差文章分数明显更低', badScore + ' vs ' + goodScore);
+    ok(partScore('词数要求') < 2.5, '字数没写够要扣分', partScore('词数要求'));
+    ok(partScore('篇章结构') < 3, '不分段要扣结构分', partScore('篇章结构'));
+    ok(qa('.essay-list li').length >= 2, '列出了多条问题', qa('.essay-list li').length);
+    ok(txt('.essay-report').indexOf('还差') >= 0, '提示字数不够', '');
+    // 跑题的长文章: 字数够但内容分必须塌
+    type(OFF_TOPIC);
+    click('[data-action="grade-essay"]');
+    ok(partScore('内容切题') < 3.5, '跑题的文章内容分很低', partScore('内容切题')
+      + ' / ' + txt('.essay-report').match(/要点\d+ \d+\/\d+/g));
+    ok(txt('.essay-report').indexOf('偏题') >= 0, '跑题会明确提示', '');
+    type(BAD);
+    click('[data-action="grade-essay"]');
+
+    /* ---------- 7. 完成练习 -> 结果页 ---------- */
+    click('[data-action="finish-practice"]');
+    ok(txt('.score-num') === badScore + ' 分', '结果页总分 = 作文分', txt('.score-num'));
+    ok(txt('.score-sub').indexOf('满分 20 分') >= 0, '满分只算作文', txt('.score-sub'));
+    ok(txt('.score-detail').indexOf('作文') > 0, '明细里有作文', txt('.score-detail'));
+    ok(!!q('#essay-report'), '结果页带完整评分');
+    ok(!q('.review-item'), '没有客观题就不显示答题回顾');
+
+    const h1 = JSON.parse(localStorage.getItem('qb_history_v2')).english[0];
+    ok(h1.essayFull === 20 && h1.essayScore === badScore, '成绩记录了作文分',
+      JSON.stringify({ s: h1.essayScore, f: h1.essayFull }));
+    ok(h1.total === 0 && h1.correct === 0, '没有客观题', JSON.stringify(h1));
+    const wrongRaw = localStorage.getItem('qb_wrong_v2');
+    ok(!wrongRaw || (JSON.parse(wrongRaw).english || []).length === 0, '写作文不进错题本', wrongRaw);
+
+    /* ---------- 8. 模拟考试带作文 ---------- */
+    click('[data-action="home"]');
+    ok(stat(1) === '0', '首页错题数仍是 0', stat(1));
+    ok(stat(2) === badScore + ' / 20', '首页最近得分按作文算', stat(2));
+    ok(txt('.history-item').indexOf('写作练习') > 0, '历史记录标成写作练习', txt('.history-item'));
+    ok(txt('.history-item').indexOf(badScore + ' / 20') > 0, '历史记录分数正确', txt('.history-item'));
+
+    click('[data-action="start-exam"]');
+    ok(txt('.progress-wrap span').indexOf('/ 41 题') > 0, '40 题 + 作文 = 41 步', txt('.progress-wrap span'));
+    const navBtns = qa('.nav-btn');
+    ok(navBtns.length === 41, '答题卡有 41 格', navBtns.length);
+    ok(navBtns[40].textContent === '作文', '最后一格是作文', navBtns[40].textContent);
+
+    // 从第 40 题点"下一题"应该翻到作文
+    click('[data-action="goto"][data-index="39"]');
+    ok(txt('.progress-wrap span').indexOf('40 / 41') > 0, '翻到第 40 题', txt('.progress-wrap span'));
+    click('[data-action="next"]');
+    ok(txt('.progress-wrap span') === '作文', '下一题能翻到作文', txt('.progress-wrap span'));
+    ok(!!q('#essay-input'), '考试里也有作文输入框');
+    ok(!q('#essay-report'), '考试中不立刻给分');
+    // 考试里给范文就是送答案
+    ok(!q('[data-action="toggle-model"]'), '考试里没有"看范文"按钮');
+    ok(!q('.essay-model'), '考试里范文根本不在 DOM 里');
+
+    // 这一步前面有 40 道题, 方向键在输入框里必须失效, 否则打字打到一半就跳走了
+    pressKey('ArrowLeft');
+    ok(progress().indexOf('作文') >= 0, '考试里在输入框按 ← 不会跳回上一题', progress());
+    pressKey('a');
+    ok(progress().indexOf('作文') >= 0, '考试里在输入框按 a 不会选中选项', progress());
+
+    // 考试里写完作文也不立刻显示分数 (抽到哪篇就写哪篇)
+    const drawn = txt('.essay-title');
+    ok(drawn === 'Media and Shopping' || drawn === 'Some Aged People Like to Live Alone',
+      '抽到题库里的两篇之一', drawn);
+    type(essayFor(drawn));
+    ok(!q('#essay-report'), '考试中提交前看不到分');
+    ok(txt('#answered-count') === '已答 1', '打字时"已答"实时更新', txt('#answered-count'));
+
+    click('[data-action="submit-exam"]');
+    ok(!!q('#essay-report'), '交卷后显示作文评分');
+    ok(qa('.essay-model p').length === 3, '交卷后范文跟着评分一起出来', qa('.essay-model p').length);
+    const drawnModel = q('.essay-model') ? txt('.essay-model') : '';
+    // 抽到哪篇就摆哪篇的范文, 别串了 (认各自的标志句; 两篇的段首都可能是 Nowadays, 认不得)
+    const marker = drawn === 'Media and Shopping'
+      ? 'Media shopping is very convenient' : 'Why do they live alone';
+    ok(drawnModel.indexOf(marker) >= 0, '给出的范文和抽到的那篇对得上',
+      drawn + ' → ' + drawnModel.slice(0, 30));
+    const examEssay = parseFloat(txt('.essay-score .num'));
+    ok(examEssay >= 15, '考试里的作文也能评到高分', examEssay);
+    ok(txt('.score-sub').indexOf('满分 60 分') >= 0, '总分满分 60', txt('.score-sub'));
+    ok(txt('.score-detail').indexOf(examEssay + '/20') > 0, '明细里的作文分', txt('.score-detail'));
+    // 客观题一道没答, 所以总分应该正好等于作文分
+    ok(txt('.score-detail').indexOf('未答') > 0 && txt('.score-detail').indexOf('40') > 0,
+      '40 道客观题都记成未答', txt('.score-detail'));
+    ok(Math.abs(parseFloat(txt('.score-num')) - examEssay) < 0.01, '总分 = 0 + 作文分',
+      txt('.score-num') + ' vs ' + examEssay);
+
+    const h2 = JSON.parse(localStorage.getItem('qb_history_v2')).english[0];
+    ok(h2.essayFull === 20 && h2.essayScore === examEssay, '考试成绩含作文');
+    ok(h2.total === 40 && h2.correct === 0, '客观题满分 40 且全错', h2.total + '/' + h2.correct);
+
+    /* ---------- 9. 关掉作文开关 ---------- */
+    click('[data-action="home"]');
+    ok(txt('.history-item').indexOf('含作文') > 0, '历史标签带"含作文"', txt('.history-item'));
+    ok(stat(2) === examEssay + ' / 60', '首页最近得分是合分', stat(2));
+    ok(q('[data-action="toggle-essay"]').checked === true, '开关保持勾选');
+    click('[data-action="toggle-essay"]');
+    ok(txt('.mode-card.primary .d').indexOf('满分 40 分') >= 0, '关掉后回到 40 分', txt('.mode-card.primary .d'));
+    click('[data-action="start-exam"]');
+    ok(txt('.progress-wrap span').indexOf('/ 40 题') > 0, '没有作文时还是 40 步', txt('.progress-wrap span'));
+    ok(qa('.nav-btn').length === 40, '答题卡 40 格', qa('.nav-btn').length);
+    click('[data-action="exit-session"]');
+
+    /* ---------- 10. 随机抽一篇 ---------- */
+    const seen = {};
+    for (let i = 0; i < 40; i++) {
+      click('[data-action="goto-practice"]');
+      click('[data-scope="writing"]');
+      seen[q('.essay-title').textContent] = true;
+      // exit-session 直接回到首页, 首页本身没有 home 按钮
+      click('[data-action="exit-session"]');
+    }
+    const titles = Object.keys(seen);
+    ok(titles.length === 2, '随机抽题两篇都能抽到', titles.join(' / '));
+  } catch (err) {
+    fail++;
+    out.push('FAIL  抛异常: ' + (err && err.stack ? err.stack : err));
+  }
+
+  out.unshift('==== ' + pass + ' passed, ' + fail + ' failed ====');
+  const box = document.createElement('pre');
+  box.id = 'testout';
+  box.textContent = out.join('\n');
+  document.body.appendChild(box);
+})();
+</script>
+</body>
+</html>

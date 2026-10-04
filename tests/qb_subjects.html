@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>科目层测试</title>
+<link rel="stylesheet" href="../styles.css">
+<script>try { localStorage.clear(); } catch (e) {}</script>
+</head>
+<body>
+<div class="app" id="app"></div>
+<script src="../questions.js"></script>
+<script src="../explanations.js"></script>
+<script>
+// 注入一个合成的第二科目, 题目 id 故意和英语重名 (lx1-1 / lx1-2 ...), 用来验证隔离
+window.QUESTION_BANKS['数据结构'] = {
+  name: '数据结构',
+  types: [{ id: 'single', name: '单选题' }],
+  sections: [
+    { id: 'lx1', name: '练习一', desc: '', type: 'single' },
+    { id: 'lx2', name: '练习二', desc: '', type: 'single' }
+  ],
+  questions: [
+    { id: 'lx1-1', section: 'lx1', type: 'single', no: 1, stem: '栈的操作特点是 ____。', options: ['先进先出', '后进先出', '随机存取', '顺序存取'], answer: 1 },
+    { id: 'lx1-2', section: 'lx1', type: 'single', no: 2, stem: '队列的操作特点是 ____。', options: ['先进先出', '后进先出', '随机存取', '顺序存取'], answer: 0 },
+    { id: 'lx1-3', section: 'lx1', type: 'single', no: 3, stem: '二叉树第 3 层最多有 ____ 个结点。', options: ['2', '4', '8', '16'], answer: 1 },
+    { id: 'lx2-1', section: 'lx2', type: 'single', no: 1, stem: '顺序表插入的时间复杂度是 ____。', options: ['O(1)', 'O(log n)', 'O(n)', 'O(n^2)'], answer: 2 },
+    { id: 'lx2-2', section: 'lx2', type: 'single', no: 2, stem: '单链表删除结点需要知道 ____。', options: ['头结点', '前驱结点', '尾结点', '数据域'], answer: 1 },
+    { id: 'lx2-3', section: 'lx2', type: 'single', no: 3, stem: '深度优先遍历通常借助 ____ 实现。', options: ['栈', '队列', '数组', '堆'], answer: 0 }
+  ]
+};
+</script>
+<script src="../dict.js"></script>
+<script src="../app.js"></script>
+<script>
+(function () {
+  const out = [];
+  let pass = 0, fail = 0;
+  function ok(cond, name, extra) {
+    if (cond) { pass++; out.push('PASS  ' + name); }
+    else { fail++; out.push('FAIL  ' + name + (extra != null ? '  → ' + extra : '')); }
+  }
+  function q(sel) { return document.querySelector(sel); }
+  function qa(sel) { return Array.prototype.slice.call(document.querySelectorAll(sel)); }
+  function click(sel) {
+    const el = q(sel);
+    if (!el) { throw new Error('找不到元素: ' + sel); }
+    el.click();
+  }
+  function txt(sel) { const el = q(sel); return el ? el.textContent : null; }
+  function stat(i) { const els = qa('.stat b'); return els[i] ? els[i].textContent : null; }
+
+  window.confirm = function () { return true; };
+  window.alert = function () {};
+
+  try {
+    /* ---- 1. 默认科目 ---- */
+    ok(txt('.hero h1') === '英语刷题', '默认进入英语', txt('.hero h1'));
+    ok(document.title === '英语刷题 · 考前突击', '标题随科目变化', document.title);
+    ok(qa('.subject-tab').length === 2, '每个科目一个标签 (英语/数据结构)',
+      qa('.subject-tab').map(function (x) { return x.textContent; }).join(','));
+    ok(txt('.subject-tab.active') === '英语', '英语标签是激活态', txt('.subject-tab.active'));
+    ok(stat(0) === '104', '英语题库 104 题 (含阅读理解/单句翻译)', stat(0));
+    ok(!!q('[data-action="toggle-random"]'), '英语显示"随机抽题"复选框');
+
+    /* ---- 2. 切到 数据结构 ---- */
+    click('[data-subject="数据结构"]');
+    ok(txt('.hero h1') === '数据结构刷题', '切换到数据结构', txt('.hero h1'));
+    ok(document.title === '数据结构刷题 · 考前突击', '标题跟着切', document.title);
+    ok(txt('.subject-tab.active') === '数据结构', '激活标签切换', txt('.subject-tab.active'));
+    ok(stat(0) === '6', '数据结构题库 6 题', stat(0));
+    ok(stat(1) === '0', '数据结构错题本初始为空', stat(1));
+    ok(stat(2) === '—', '数据结构无成绩记录', stat(2));
+    ok(!q('[data-action="toggle-random"]'), '题量不足 20 不显示"随机抽题"');
+    ok((txt('.mode-card.primary .d') || '').indexOf('全部 6 题') >= 0, '考试描述按科目算', txt('.mode-card.primary .d'));
+
+    /* ---- 3. 练习设置: 同题型两个分节应展开为子项 ---- */
+    click('[data-action="goto-practice"]');
+    ok(qa('.type-head').length === 1, '数据结构只有一个题型分组', qa('.type-head').length);
+    ok(txt('.type-head .t') === '单选题 · 全部 6 题', '题型分组题数正确', txt('.type-head .t'));
+    ok(qa('.sub-row').length === 2, '两个分节各占一行', qa('.sub-row').length);
+
+    /* ---- 4. 在数据结构下答错一题 ---- */
+    click('[data-scope="type:single"]');
+    const opts = qa('.option');
+    ok(opts.length === 4, '练习页渲染 4 个选项', opts.length);
+    opts[0].click();                       // lx1-1 正确答案是 B, 选 A 即答错
+    ok(!!q('.feedback.no'), '练习题答错有反馈');
+    ok(!q('.explain'), '数据结构不借用英语的解析数据');
+
+    click('[data-action="exit-session"]');
+    ok(txt('.hero h1') === '数据结构刷题', '退出回到数据结构首页', txt('.hero h1'));
+    ok(stat(1) === '1', '数据结构错题本 1 题', stat(1));
+
+    /* ---- 5. 切回英语: 错题本必须互不影响 ---- */
+    click('[data-subject="english"]');
+    ok(stat(1) === '0', '英语错题本没有被数据结构的错题污染', stat(1));
+    ok(stat(0) === '104', '切回英语题量正确', stat(0));
+
+    /* ---- 6. 英语也答错一题 ---- */
+    click('[data-action="goto-practice"]');
+    click('[data-scope="type:single"]');
+    qa('.option')[2].click();              // lx1-13 正确答案是 A, 选 C 即答错
+    ok(!!q('.explain'), '英语仍然显示解析面板');
+    ok((txt('.explain') || '').indexOf('条件状语从句') >= 0, '解析内容对得上题目', txt('.explain'));
+    click('[data-action="exit-session"]');
+    ok(stat(1) === '1', '英语错题本 1 题', stat(1));
+
+    /* ---- 7. localStorage 分桶结构 (核心: 同名 id 分属不同桶) ---- */
+    const w = JSON.parse(localStorage.getItem('qb_wrong_v2') || 'null');
+    ok(!!w, '写入了 qb_wrong_v2');
+    ok(w && Object.keys(w).sort().join(',') === 'english,数据结构',
+      'v2 按科目分两个桶', w && Object.keys(w).join(','));
+    ok(w && Object.keys(w.english).join(',') === 'lx1-13', '英语桶只存英语题', w && Object.keys(w.english).join(','));
+    ok(w && Object.keys(w['数据结构']).join(',') === 'lx1-1', '数据结构桶只存数据结构题', w && Object.keys(w['数据结构']).join(','));
+    ok(w && w['数据结构']['lx1-1'].lastAnswer === 0, '存的是原始下标 0', w && w['数据结构']['lx1-1'].lastAnswer);
+    ok(localStorage.getItem('qb_wrong_v1') === null, '没有回写旧的 v1 键');
+
+    /* ---- 8. 成绩也分科目 (放最后, 因为交白卷会把 40 题全记进错题本) ---- */
+    click('[data-action="start-exam"]');
+    ok(txt('.topbar .title').indexOf('模拟考试') === 0, '进入考试视图', txt('.topbar .title'));
+    click('[data-action="submit-exam"]');
+    const h = JSON.parse(localStorage.getItem('qb_history_v2') || 'null');
+    ok(!!h && !!h.english && h.english.length === 1, '英语成绩记进英语桶', h && JSON.stringify(Object.keys(h)));
+    ok(!!h && !h['数据结构'], '数据结构桶没有成绩', h && JSON.stringify(Object.keys(h)));
+    ok(txt('.score-num') === '0 分', '结果页显示 0 分', txt('.score-num'));
+
+    click('[data-action="home"]');
+    ok(stat(2) === '0 分', '首页最近得分更新', stat(2));
+    ok(stat(1) === '40', '交白卷后 40 题全入错题本', stat(1));
+
+    /* ---- 9. 科目记忆 ---- */
+    click('[data-subject="数据结构"]');
+    const p = JSON.parse(localStorage.getItem('qb_prefs_v1') || 'null');
+    ok(!!p && p.subject === '数据结构', '记住上次选的科目', p && p.subject);
+  } catch (err) {
+    fail++;
+    out.push('FAIL  抛异常: ' + (err && err.stack ? err.stack : err));
+  }
+
+  out.unshift('==== ' + pass + ' passed, ' + fail + ' failed ====');
+  const box = document.createElement('pre');
+  box.id = 'testout';
+  box.textContent = out.join('\n');
+  document.body.appendChild(box);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>smoke10</title></head>
+<body>
+<div class="app" id="app"></div>
+<script>window.confirm=function(){return true;};window.alert=function(m){window.__a=m;};</script>
+<script src="../questions.js"></script>
+<script src="../explanations.js"></script>
+<script src="../dict.js"></script>
+<script src="../app.js"></script>
+<pre id="out"></pre>
+<script>
+(function () {
+  var log = [], fails = 0;
+  function say(s) { log.push(s); document.getElementById('out').textContent = log.join('\n'); }
+  function check(n, c, e) { if (!c) fails++; say((c ? '  PASS  ' : '  FAIL  ') + n + (e ? '  [' + e + ']' : '')); }
+  function q(s) { return document.querySelector(s); }
+  function total() { return parseInt(q('.progress-wrap span').textContent.match(/\/ (\d+)/)[1], 10); }
+  var bank = window.QUESTION_BANKS.english;
+
+  function run() {
+    localStorage.clear();
+
+    // ---- 数据层 ----
+    check('题库有 types 字段', Array.isArray(bank.types) && bank.types.length > 0, JSON.stringify(bank.types));
+    check('题型为单选题', bank.types[0].name === '单选题' && bank.types[0].id === 'single');
+    var typeIds = bank.types.map(function (t) { return t.id; });
+    check('每道题都带 type', bank.questions.every(function (x) { return typeIds.indexOf(x.type) > -1; }));
+    check('每个分节都带 type', bank.sections.every(function (s) { return typeIds.indexOf(s.type) > -1; }));
+
+    // ---- 首页 ----
+    check('首页标注题型', q('.hero p').textContent.indexOf('单选题') === 0, q('.hero p').textContent);
+
+    // ---- 练习范围选择 ----
+    q('[data-action="goto-practice"]').click();
+    // 四张卡片: 单选题 / 阅读理解 / 单句翻译 / 写作(作文单独成组)
+    var cards = document.querySelectorAll('.type-card');
+    check('出现题型分组卡片', cards.length === 4, String(cards.length));
+    check('题型入口显示全部题数', q('.type-head .t').textContent === '单选题 · 全部 40 题', q('.type-head .t').textContent);
+    check('题型入口显示满分', q('.type-head .d').textContent === '每题 1 分 · 满分 40 分', q('.type-head .d').textContent);
+    // 只看单选题分组下的分节, 别把阅读理解和写作的算进来
+    var subs = [].map.call(cards[0].querySelectorAll('.sub-row'), function (r) {
+      return r.querySelector('.t').textContent + '=' + r.querySelector('.d').textContent;
+    });
+    check('分组下列出三个分节', subs.join(',') === '练习一=6 题,练习二=17 题,练习三=17 题', subs.join(','));
+    // 阅读理解并进了英语科目, 单独一组, 分值按题型算
+    check('第二张卡片是阅读理解', cards[1].querySelector('.type-head .t').textContent.indexOf('阅读理解') === 0,
+      cards[1].querySelector('.type-head .t').textContent);
+    check('阅读理解组写着 44 题', cards[1].querySelector('.type-head .t').textContent.indexOf('全部 44 题') > -1,
+      cards[1].querySelector('.type-head .t').textContent);
+    check('阅读理解组写着满分 100 分 (选择 2 分 · 翻译 5 分)',
+      cards[1].querySelector('.type-head .d').textContent === '选择 2 分 · 翻译 5 分 · 满分 100 分',
+      cards[1].querySelector('.type-head .d').textContent);
+    var rdSubs = [].map.call(cards[1].querySelectorAll('.sub-row'), function (r) {
+      return r.querySelector('.t').textContent + '=' + r.querySelector('.d').textContent;
+    });
+    check('阅读理解组下列出四个分节', rdSubs.join(',') === '练习一=17 题 · 40 分,练习二=5 题 · 10 分,练习三=5 题 · 10 分,练习四=17 题 · 40 分',
+      rdSubs.join(','));
+    check('第三张卡片是单句翻译', cards[2].querySelector('.type-head .t').textContent.indexOf('单句翻译') === 0,
+      cards[2].querySelector('.type-head .t').textContent);
+    check('单句翻译组写着 20 题', cards[2].querySelector('.type-head .t').textContent.indexOf('全部 20 题') > -1,
+      cards[2].querySelector('.type-head .t').textContent);
+    check('单句翻译组写着每题 2 分 · 满分 40 分',
+      cards[2].querySelector('.type-head .d').textContent === '每题 2 分 · 满分 40 分',
+      cards[2].querySelector('.type-head .d').textContent);
+    check('单句翻译组下列出两个分节', cards[2].querySelectorAll('.sub-row').length === 2,
+      String(cards[2].querySelectorAll('.sub-row').length));
+    check('第四张卡片是写作', cards[3].querySelector('.type-head .t').textContent.indexOf('写作') === 0,
+      cards[3].querySelector('.type-head .t').textContent);
+    check('写作组下列出两篇作文', cards[3].querySelectorAll('.sub-row').length === 2,
+      String(cards[3].querySelectorAll('.sub-row').length));
+
+    // ---- 按题型开始练习 ----
+    q('.type-head').click();
+    check('题型入口 = 40 题', total() === 40, String(total()));
+    check('题目标注含题型', q('.qmeta').textContent.indexOf('单选题 · 练习一 · 第 13 题') === 0, q('.qmeta').textContent.trim());
+    check('标注含分值', q('.qmeta').textContent.indexOf('· 1 分') > -1, q('.qmeta').textContent.trim());
+    q('[data-action="exit-session"]').click();
+
+    // ---- 按分节开始练习 ----
+    q('[data-action="goto-practice"]').click();
+    document.querySelectorAll('.sub-row')[1].click();
+    check('练习二 = 17 题', total() === 17, String(total()));
+    check('分节标注正确', q('.qmeta').textContent.indexOf('单选题 · 练习二') === 0, q('.qmeta').textContent.trim());
+    q('[data-action="exit-session"]').click();
+
+    // ---- 错题本标注 ----
+    q('[data-action="goto-practice"]').click();
+    document.querySelectorAll('.sub-row')[0].click();
+    document.querySelector('[data-action="pick"][data-opt="0"]').click();  // 第13题选A 正确
+    q('[data-action="next"]:not([disabled])').click();                       // 翻到第14题
+    document.querySelector('[data-action="pick"][data-opt="1"]').click();  // 第14题选B 错误
+    q('[data-action="exit-session"]').click();
+    q('[data-action="open-wrongbook"]').click();
+    check('错题本标注含题型', q('.review-item .qmeta').textContent.indexOf('单选题 · 练习一 · 第 14 题') === 0,
+      q('.review-item .qmeta').textContent);
+
+    // ---- 模拟考试标注 ----
+    q('[data-action="home"]').click();
+    q('[data-action="start-exam"]').click();
+    check('考试题标注含题型', q('.qmeta').textContent.indexOf('单选题 · 练习一') === 0, q('.qmeta').textContent.trim());
+    q('[data-action="pick"][data-opt="1"]').click();
+    q('[data-action="submit-exam"]').click();
+    var wrongOnly = document.querySelector('[data-action="toggle-wrong-only"]');
+    if (wrongOnly && wrongOnly.checked) wrongOnly.click();
+    check('回顾页标注含题型', q('.review-item .qmeta').textContent.indexOf('单选题') === 0,
+      q('.review-item .qmeta').textContent);
+
+    say('');
+    say(fails === 0 ? '全部通过 ✓' : (fails + ' 项失败 ✗'));
+  }
+  window.addEventListener('load', function () { setTimeout(run, 50); });
+})();
+</script>
+</body></html>

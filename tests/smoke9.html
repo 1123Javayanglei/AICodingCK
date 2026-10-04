@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>smoke9</title></head>
+<body>
+<div class="app" id="app"></div>
+<script>window.confirm=function(){return true;};window.alert=function(){};</script>
+<script src="../questions.js"></script>
+<script src="../explanations.js"></script>
+<script src="../dict.js"></script>
+<script src="../app.js"></script>
+<pre id="out"></pre>
+<script>
+(function () {
+  var log = [], fails = 0;
+  function say(s) { log.push(s); document.getElementById('out').textContent = log.join('\n'); }
+  function check(n, c, e) { if (!c) fails++; say((c ? '  PASS  ' : '  FAIL  ') + n + (e ? '  [' + e + ']' : '')); }
+  function q(s) { return document.querySelector(s); }
+  var all = window.QUESTION_BANKS.english.questions;
+  // 分节名会在题型之间重名 (单选题和阅读理解都有"练习一"), 键用"题型/分节"
+  var SEC = {};
+  (function () {
+    var b = window.QUESTION_BANKS.english;
+    b.sections.forEach(function (s) {
+      var t = b.types.filter(function (x) { return x.id === s.type; })[0];
+      SEC[(t ? t.name : s.type) + '/' + s.name] = s.id;
+    });
+  })();
+  function secId(meta) {
+    var m = meta.textContent.match(/(\S+) · (练习\S+?) · 第 (\d+) 题/);
+    return m ? (SEC[m[1] + '/' + m[2]] + '-' + m[3]) : null;
+  }
+  function curId() {
+    return secId(q('.qmeta') || { textContent: '' });
+  }
+  function curQ() { var id = curId(); return all.filter(function (x) { return x.id === id; })[0]; }
+  function total() { return parseInt(q('.progress-wrap span').textContent.match(/\/ (\d+)/)[1], 10); }
+  function cb(a) { return document.querySelector('[data-action="' + a + '"]'); }
+  function setCb(a, v) { var el = cb(a); el.checked = v; el.dispatchEvent(new Event('change', { bubbles: true })); }
+  // 做完当前整套题, correct=true 全对, false 全错
+  // 按选项文本定位按钮, 这样在乱序模式下也点得准
+  function clickByText(txt) {
+    var target = null;
+    document.querySelectorAll('.option').forEach(function (b) {
+      if (!target && b.querySelector('.text').textContent === txt) target = b;
+    });
+    if (!target) throw new Error('找不到选项: ' + txt);
+    target.click();
+  }
+  function doAll(correct) {
+    var ids = [];
+    var n = total();
+    for (var i = 0; i < n; i++) {
+      var o = curQ(); ids.push(o.id);
+      clickByText(correct ? o.options[o.answer] : o.options[(o.answer + 1) % 4]);
+      if (i === n - 1) break;
+      q('[data-action="next"]:not([disabled])').click();
+    }
+    return ids;
+  }
+  function bookIds() {
+    var out = [];
+    document.querySelectorAll('.review-item').forEach(function (it) {
+      var id = secId(it.querySelector('.qmeta'));
+      if (id) out.push(id);
+    });
+    return out;
+  }
+  function dupOptionTexts() {
+    // 翻译题没有选项, 不参与; 其余题必须四个选项各不重复 (乱序下按文本点选项要靠它)
+    return all.filter(function (x) { return x.options && x.options.length && new Set(x.options).size !== x.options.length; })
+      .map(function (x) { return x.id; });
+  }
+
+  function run() {
+    localStorage.clear();
+    check('所有题目选项文本互不重复', dupOptionTexts().length === 0, dupOptionTexts().join(','));
+    check('默认不抽题', cb('toggle-random').checked === false);
+
+    // ---- 不开抽题: 40 题 ----
+    q('[data-action="start-exam"]').click();
+    check('未抽题时 40 题', total() === 40, String(total()));
+    check('未抽题无抽题标记', !q('.topbar .badge'));
+    q('[data-action="exit-session"]').click();
+
+    // ---- 开启抽题 ----
+    setCb('toggle-random', true);
+    check('抽题偏好已保存', JSON.parse(localStorage.getItem('qb_prefs_v1')).sampleQuestions === true);
+    check('卡片描述已更新', q('.mode-card.primary .d').textContent.indexOf('随机抽 20 题') > -1,
+      q('.mode-card.primary .d').textContent);
+    check('满分同步为 20', q('.mode-card.primary .d').textContent.indexOf('满分 20 分') > -1);
+
+    // 抽 5 次, 每次 20 题且组合不同
+    var seen = {}, dupCount = 0, sizeBad = 0, allIds = {};
+    for (var t = 0; t < 5; t++) {
+      q('[data-action="start-exam"]').click();
+      if (total() !== 20) sizeBad++;
+      var n = total(), key = [];
+      for (var i = 0; i < n; i++) {
+        var id = curId(); key.push(id); allIds[id] = true;
+        if (i < n - 1) q('[data-action="next"]:not([disabled])').click();
+      }
+      key.sort();
+      var k = key.join(',');
+      if (seen[k]) dupCount++; else seen[k] = 1;
+      if (t === 0) {
+        check('抽题标记显示', q('.topbar .badge') && q('.topbar .badge').textContent.indexOf('随机抽题 20') > -1,
+          q('.topbar .badge') && q('.topbar .badge').textContent);
+        check('抽出的 20 题互不重复', new Set(key).size === 20);
+      }
+      q('[data-action="exit-session"]').click();
+    }
+    check('每次都是 20 题', sizeBad === 0, sizeBad + ' 次数量异常');
+
+    // ---- 抽题 + 全对 -> 满分 20, 错题本空 ----
+    q('[data-action="start-exam"]').click();
+    var ids = doAll(true);
+    q('[data-action="submit-exam"]').click();
+    check('全对得 20 分', q('.score-num').textContent === '20 分', q('.score-num').textContent);
+    check('结果页标注抽题 20', q('.score-sub').textContent.indexOf('抽20题') > -1, q('.score-sub').textContent);
+    check('结果页满分 20', q('.score-sub').textContent.indexOf('满分 20 分') > -1);
+    var wrongOnly = document.querySelector('[data-action="toggle-wrong-only"]');
+    if (wrongOnly && wrongOnly.checked) wrongOnly.click();
+    check('回顾只有 20 条', document.querySelectorAll('.review-item').length === 20,
+      String(document.querySelectorAll('.review-item').length));
+    q('[data-action="home"]').click();
+    check('全对后错题本为空', cb('open-wrongbook').querySelector('.t').textContent === '错题本 · 0 题');
+    check('历史记录标注抽题', q('.history-item').textContent.indexOf('抽20题') > -1, q('.history-item').textContent);
+
+    // ---- 抽题 + 全错 -> 20 题进错题本, 未抽到的 20 题不受影响 ----
+    q('[data-action="start-exam"]').click();
+    var ids2 = doAll(false);
+    q('[data-action="submit-exam"]').click();
+    check('全错得 0 分', q('.score-num').textContent === '0 分', q('.score-num').textContent);
+    q('[data-action="home"]').click();
+    check('错题本 20 题', cb('open-wrongbook').querySelector('.t').textContent === '错题本 · 20 题',
+      cb('open-wrongbook').querySelector('.t').textContent);
+
+    // 每次抽的题不同 -> 累计覆盖
+    var covered = {};
+    ids.concat(ids2).forEach(function (i) { covered[i] = 1; });
+    q('[data-action="open-wrongbook"]').click();
+    var wrongInBook = [];
+    document.querySelectorAll('.review-item').forEach(function (it) {
+      wrongInBook.push(secId(it.querySelector('.qmeta')));
+    });
+    var shouldBe = ids2.filter(function (i) { return !covered[i] || ids.indexOf(i) === -1; });
+    check('错题本条目全部来自本轮抽题', wrongInBook.sort().join(',') === ids2.slice().sort().join(','),
+      '错题本 ' + wrongInBook.length + ' 条 vs 本轮 ' + ids2.length + ' 题');
+
+    // ---- 两个开关同时开 ----
+    q('[data-action="home"]').click();
+    setCb('toggle-shuffle', true);
+    check('描述含两个标记', q('.mode-card.primary .d').textContent.indexOf('选项乱序') > -1,
+      q('.mode-card.primary .d').textContent);
+    q('[data-action="start-exam"]').click();
+    check('抽题+乱序同时生效', total() === 20 && q('.topbar .badge').textContent.indexOf('选项乱序') > -1,
+      q('.topbar .badge').textContent);
+    var ids3 = doAll(true);
+    q('[data-action="submit-exam"]').click();
+    check('抽题+乱序全对仍是 20 分', q('.score-num').textContent === '20 分', q('.score-num').textContent);
+    q('[data-action="home"]').click();
+    // 上轮全错留下 20 条; 本轮重抽到且答对的应被移出, 没抽到的应保留
+    q('[data-action="open-wrongbook"]').click();
+    var bookNow = bookIds();
+    var redrawn = ids2.filter(function (i) { return ids3.indexOf(i) > -1; });
+    var expectRemain = ids2.filter(function (i) { return ids3.indexOf(i) === -1; });
+    check('本轮重抽到且答对的已移出错题本',
+      redrawn.every(function (i) { return bookNow.indexOf(i) === -1; }),
+      '本轮重抽到 ' + redrawn.length + ' 条');
+    check('本轮没抽到的错题原样保留',
+      bookNow.sort().join(',') === expectRemain.sort().join(','),
+      '错题本 ' + bookNow.length + ' 条, 期望 ' + expectRemain.length + ' 条');
+    q('[data-action="home"]').click();
+
+    // ---- 练习模式不受抽题开关影响 ----
+    q('[data-action="goto-practice"]').click();
+    document.querySelectorAll('[data-action="start-practice"]')[0].click();
+    check('练习模式仍是全部 40 题', total() === 40, String(total()));
+
+    say('');
+    say(fails === 0 ? '全部通过 ✓' : (fails + ' 项失败 ✗'));
+  }
+  window.addEventListener('load', function () { setTimeout(run, 50); });
+})();
+</script>
+</body></html>

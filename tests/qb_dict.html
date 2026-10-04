@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>悬停释义测试</title>
+<link rel="stylesheet" href="../styles.css">
+<script>try { localStorage.clear(); } catch (e) {}</script>
+</head>
+<body>
+<div class="app" id="app"></div>
+<script src="../questions.js"></script>
+<script src="../explanations.js"></script>
+<script src="../essay-rubrics.js"></script>
+<script src="../dict.js"></script>
+<script src="../app.js"></script>
+<script>
+(async function () {
+  const out = [];
+  let pass = 0, fail = 0;
+  // 悬停有 120ms 延迟(防扫读时闪), 断言前得等它一下
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  function ok(cond, name, extra) {
+    if (cond) { pass++; out.push('PASS  ' + name); }
+    else { fail++; out.push('FAIL  ' + name + (extra != null ? '  → ' + extra : '')); }
+  }
+  function q(sel) { return document.querySelector(sel); }
+  function qa(sel) { return Array.prototype.slice.call(document.querySelectorAll(sel)); }
+  function txt(sel) { const el = q(sel); return el ? el.textContent : null; }
+  function click(sel) { const el = q(sel); if (!el) throw new Error('找不到元素: ' + sel); el.click(); }
+  function hover(el) {
+    el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+  }
+
+  window.confirm = function () { return true; };
+  window.alert = function () {};
+
+  try {
+
+  const DICT = window.WORD_DICT || {};
+  const WORD_RE = /[A-Za-z][A-Za-z'-]*/g;
+
+  // 和 app.js 里 glossOf 同一套归一化: 先原样查, 再剥所有格。
+  // 单个字母只有 a / i 算词, 其余是"排除 C、D"这类选项编号, 不算。
+  function lookup(raw) {
+    const w = String(raw).toLowerCase();
+    if (w.length < 2) return (w === 'a' || w === 'i') ? (DICT[w] || '') : 'skip';
+    if (DICT[w]) return DICT[w];
+    return DICT[w.replace(/'s?$/, '')] || '';
+  }
+  function wordsIn(text) { return String(text == null ? '' : text).match(WORD_RE) || []; }
+
+  /* ---------- 1. 词典数据本身 ---------- */
+  const keys = Object.keys(DICT);
+  ok(keys.length > 400, '词典有条目', keys.length);
+
+  const badKey = keys.filter(function (k) { return k !== k.toLowerCase(); });
+  ok(badKey.length === 0, '键一律小写(否则查不到)', badKey.slice(0, 5).join(','));
+
+  const badVal = keys.filter(function (k) { return typeof DICT[k] !== 'string' || !DICT[k].trim(); });
+  ok(badVal.length === 0, '没有空释义', badVal.slice(0, 5).join(','));
+
+  const badSpace = keys.filter(function (k) { return /\s/.test(k); });
+  ok(badSpace.length === 0, '键里没有空格(词组查不到)', badSpace.slice(0, 5).join(','));
+
+  /* ---------- 2. 题库里每个词都有释义 ----------
+     这是这个文件存在的主要理由: 以后往题库加题, 漏了词这里会点名。 */
+  const BANKS = window.QUESTION_BANKS || {};
+  const MODELS = window.ESSAY_MODELS || {};
+  const EXPL = window.QUESTION_EXPLANATIONS || {};
+  const seen = {};
+
+  function feed(text) {
+    wordsIn(text).forEach(function (w) { seen[w.toLowerCase()] = true; });
+  }
+  Object.keys(BANKS).forEach(function (sid) {
+    const b = BANKS[sid];
+    (b.questions || []).forEach(function (qq) {
+      feed(qq.stem);
+      (qq.options || []).forEach(feed);
+      feed(qq.source);   // 翻译题的原文
+    });
+    // 阅读理解的短文正文也会渲染出来, 同样吃悬停
+    (b.passages || []).forEach(function (p) { (p.text || []).forEach(feed); });
+    (b.essays || []).forEach(function (es) {
+      feed(es.prompt);
+      (es.outline || []).forEach(feed);
+    });
+    // 解析和句意会渲染进 .explain .body, 也吃悬停; 词汇表那一行是现成的对照, 跳过
+    const forSubject = (EXPL[sid] && typeof EXPL[sid] === 'object' && !Array.isArray(EXPL[sid]))
+      ? EXPL[sid] : (sid === 'english' ? EXPL : {});
+    Object.keys(forSubject).forEach(function (qid) {
+      const d = forSubject[qid];
+      if (!d || typeof d !== 'object') return;
+      feed(d.explain);
+      feed(d.translation);
+    });
+    // 范文
+    const m = MODELS[sid] || {};
+    Object.keys(m).forEach(function (eid) { (m[eid].paras || []).forEach(feed); });
+  });
+
+  const all = Object.keys(seen);
+  const missing = all.filter(function (w) { return !lookup(w); });
+  ok(missing.length === 0, '题库+范文里每个词都有释义',
+    '共 ' + all.length + ' 词, 缺 ' + missing.length + ': ' + missing.slice(0, 20).join(', '));
+
+  /* ---------- 3. 练习模式: 该标的标, 不该标的别动 ---------- */
+  click('[data-action="goto-practice"]');
+  click('[data-scope="type:single"]');
+  ok(!!q('.qcard'), '进入练习会话');
+
+  const stemW = qa('.stem .w');
+  ok(stemW.length > 0, '题干里的单词被标注', stemW.length);
+
+  const optW = qa('.option .text .w');
+  ok(optW.length > 0, '选项正文里的单词被标注', optW.length);
+
+  // 这一条是防呆的核心: 选项前的 A. 若被当成单词 a, 悬停会弹"一个"
+  const letters = qa('.option .letter');
+  ok(letters.length > 0, '选项有字母前缀', letters.length);
+  const letterBad = letters.filter(function (el) {
+    return el.querySelector('.w') || el.classList.contains('w');
+  });
+  ok(letterBad.length === 0, '字母前缀 A/B/C/D 没被当成单词',
+    letterBad.map(function (x) { return x.textContent; }).join(','));
+
+  ok(!q('.topbar .w'), '标题栏(中文/按钮)没被扫',
+    q('.topbar .w') && q('.topbar .w').textContent);
+
+  // 标注不能吃掉原文
+  ok(txt('.stem').indexOf('______') >= 0 || q('.stem .blank'),
+    '填空下划线还在', txt('.stem').slice(0, 40));
+
+  // 单个字母除了 a / i 都不该被当成词 —— 解析里"排除 C、D 两个选项"是选项编号
+  const lone = qa('.w').filter(function (el) {
+    return el.textContent.length < 2 && !/^[ai]$/i.test(el.textContent);
+  });
+  ok(lone.length === 0, '没有把 B/C/D 这类选项编号当成单词',
+    lone.map(function (x) { return x.textContent; }).join(','));
+
+  /* ---------- 4. 悬停弹层 ---------- */
+  const tipBefore = q('.gloss-tip');
+  ok(!tipBefore || !tipBefore.classList.contains('on'), '没悬停时页面上没有浮层');
+
+  const first = optW[0];
+  hover(first);
+  // 扫读保护: 划过去就走的不弹, 免得一路闪
+  first.dispatchEvent(new MouseEvent('mouseout', { bubbles: true }));
+  await sleep(220);
+  ok(!q('.gloss-tip') || !q('.gloss-tip').classList.contains('on'),
+    '鼠标划过就走的不弹浮层');
+
+  hover(first);
+  await sleep(220);
+  const tip = q('.gloss-tip');
+  ok(!!tip, '停住不动才弹浮层');
+  ok(tip && tip.classList.contains('on'), '浮层是显示的');
+  ok(tip.textContent === first.getAttribute('data-gloss'),
+    '浮层显示的是这个词的释义', tip.textContent + ' vs ' + first.getAttribute('data-gloss'));
+  ok(tip.style.top !== '' && tip.style.left !== '', '浮层算出了位置',
+    tip.style.top + '/' + tip.style.left);
+
+  first.dispatchEvent(new MouseEvent('mouseout', { bubbles: true }));
+  ok(!tip.classList.contains('on'), '移开后浮层收起');
+
+  /* ---------- 5. 答题后: 解析标了, 词汇表没重复标 ---------- */
+  click('.option');   // 随便选一个, 揭开答案
+  ok(!!q('.explain'), '答案已揭示, 有解析面板');
+  if (q('.explain .body')) {
+    ok(qa('.explain .body .w').length > 0, '解析正文里的单词被标注',
+      qa('.explain .body .w').length);
+  }
+  if (q('.explain .words')) {
+    ok(!q('.explain .words .w'), '词汇对照表没有被再包一层',
+      q('.explain .words .w') && q('.explain .words .w').textContent);
+  }
+
+  /* ---------- 6. 翻页后重新标注 ---------- */
+  const before = txt('.stem');
+  click('[data-action="next"]');
+  ok(qa('.stem .w').length > 0, '翻到下一题照样标注', qa('.stem .w').length);
+  ok(txt('.stem') !== before, '确实换题了');
+
+  /* ---------- 7. 考试模式不给释义 ---------- */
+  click('[data-action="exit-session"]');
+  click('[data-action="start-exam"]');
+  ok(!!q('.qcard'), '进入考试');
+  ok(qa('.w').length === 0, '考试里一个标注都没有', qa('.w').length);
+  ok(qa('.option .text').length > 0, '考试里选项正文还在', qa('.option .text').length);
+
+  /* ---------- 8. 范文也吃悬停 ---------- */
+  click('[data-action="exit-session"]');
+  click('[data-action="goto-practice"]');
+  click('[data-scope="essay:w1"]');
+  ok(!!q('.essay-model'), '练习模式有范文');
+  ok(qa('.essay-model p .w').length > 0, '范文里的单词被标注', qa('.essay-model p .w').length);
+  ok(qa('.essay-prompt .w').length > 0, '作文题目里的单词被标注', qa('.essay-prompt .w').length);
+
+  ok(qa('.essay-model .words .w').length === 0, '范文里没有多余的词汇表标注');
+
+  } catch (err) {
+    ok(false, '用例执行没抛异常', err && (err.message + ' | ' + String(err.stack || '').split('\n')[1]));
+  }
+
+  /* ---------- 结果 ---------- */
+  out.unshift('共 ' + (pass + fail) + ' 条, 通过 ' + pass + ', 失败 ' + fail);
+  const pre = document.createElement('pre');
+  pre.id = 'out';
+  pre.textContent = out.join('\n');
+  document.body.appendChild(pre);
+})();
+</script>
+</body>
+</html>

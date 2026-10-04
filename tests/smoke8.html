@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>smoke8</title></head>
+<body>
+<div class="app" id="app"></div>
+<script>window.confirm=function(){return true;};window.alert=function(){};</script>
+<script src="../questions.js"></script>
+<script src="../explanations.js"></script>
+<script src="../dict.js"></script>
+<script src="../app.js"></script>
+<pre id="out"></pre>
+<script>
+(function () {
+  var log = [], fails = 0;
+  function say(s) { log.push(s); document.getElementById('out').textContent = log.join('\n'); }
+  function check(n, c, e) { if (!c) fails++; say((c ? '  PASS  ' : '  FAIL  ') + n + (e ? '  [' + e + ']' : '')); }
+  function q(s) { return document.querySelector(s); }
+  var all = window.QUESTION_BANKS.english.questions;
+  // 分节名会在题型之间重名 (单选题和阅读理解都有"练习一"), 键用"题型/分节"
+  var SEC = {};
+  (function () {
+    var b = window.QUESTION_BANKS.english;
+    b.sections.forEach(function (s) {
+      var t = b.types.filter(function (x) { return x.id === s.type; })[0];
+      SEC[(t ? t.name : s.type) + '/' + s.name] = s.id;
+    });
+  })();
+  function curQ() {  // 返回题库里的原始题目(用于取正确答案文本)
+    var m = (q('.qmeta') || {}).textContent.match(/(\S+) · (练习\S+?) · 第 (\d+) 题/);
+    return m ? (all.filter(function (x) { return SEC[m[1] + '/' + m[2]] === x.section && x.no === parseInt(m[3], 10); })[0] || null) : null;
+  }
+  // 当前屏幕上显示的选项文本(可能是打乱后的顺序)
+  function shownOptions() {
+    return [].map.call(document.querySelectorAll('.option .text'), function (e) { return e.textContent; });
+  }
+  // 找到屏幕上一个按钮, 其文本等于给定字符串
+  function btnByText(txt) {
+    var found = null;
+    document.querySelectorAll('.option').forEach(function (b) {
+      if (b.querySelector('.text').textContent === txt) found = b;
+    });
+    return found;
+  }
+  function sameSet(a, b) { return a.slice().sort().join('|') === b.slice().sort().join('|'); }
+
+  function run() {
+    localStorage.clear();
+    // ---- 1. 默认不勾选: 选项顺序与题库一致 ----
+    check('默认未勾选', q('[data-action="toggle-shuffle"]').checked === false);
+    q('[data-action="start-exam"]').click();
+    var orig = curQ();
+    check('不打乱时选项顺序不变', shownOptions().join('|') === orig.options.join('|'));
+    q('[data-action="exit-session"]').click();
+
+    // ---- 2. 勾选后打乱 ----
+    var cb = q('[data-action="toggle-shuffle"]');
+    cb.checked = true;
+    cb.dispatchEvent(new Event('change', { bubbles: true }));
+    check('勾选状态被记住', q('[data-action="toggle-shuffle"]').checked === true);
+    check('提示文字已更新', q('.mode-opt .hint').textContent.indexOf('随机打乱') > -1, q('.mode-opt .hint').textContent);
+    check('偏好已写入 localStorage', JSON.parse(localStorage.getItem('qb_prefs_v1')).shuffleOptions === true);
+
+    q('[data-action="start-exam"]').click();
+    check('标题显示乱序标记', !!q('.topbar .badge'), q('.topbar .badge') && q('.topbar .badge').textContent);
+
+    var differed = 0, totalQ = 0, badSet = 0, wrongLetterBtn = 0;
+    for (var i = 0; i < 40; i++) {
+      var o = curQ();
+      var shown = shownOptions();
+      totalQ++;
+      if (shown.join('|') !== o.options.join('|')) differed++;
+      if (!sameSet(shown, o.options)) badSet++;
+      // 必须能按文本找到正确选项, 且它的字母要指向新位置
+      var correctBtn = btnByText(o.options[o.answer]);
+      if (!correctBtn) wrongLetterBtn++;
+      else correctBtn.click();   // 全答对
+      var nx = q('[data-action="next"]:not([disabled])'); if (nx) nx.click();
+    }
+    check('40 题选项集合完整', badSet === 0, badSet + ' 题选项丢失/重复');
+    check('绝大多数题顺序确实变了', differed >= 30, differed + '/40 题顺序改变');
+    check('每题都能定位到正确选项', wrongLetterBtn === 0);
+    q('[data-action="submit-exam"]').click();
+
+    // ---- 3. 关键: 乱序下全部答对, 错题本应为空 ----
+    q('[data-action="home"]').click();
+    check('全对后错题本为空', q('[data-action="open-wrongbook"]').querySelector('.t').textContent === '错题本 · 0 题',
+      q('[data-action="open-wrongbook"]').querySelector('.t').textContent);
+
+    // ---- 4. 关键: 乱序下故意答错, 错题本记的必须是原始下标 ----
+    q('[data-action="start-exam"]').click();
+    var wrongIds = [];
+    for (var k = 0; k < 40; k++) {
+      var o2 = curQ();
+      var shown2 = shownOptions();
+      // 故意选一个错的: 取屏幕第 1 个不是正确答案的选项
+      var pickBtn = null;
+      document.querySelectorAll('.option').forEach(function (b) {
+        if (!pickBtn && b.querySelector('.text').textContent !== o2.options[o2.answer]) pickBtn = b;
+      });
+      if (k < 5) {
+        wrongIds.push({ id: o2.id, orig: o2, chosenText: pickBtn.querySelector('.text').textContent });
+      }
+      pickBtn.click();
+      var nx2 = q('[data-action="next"]:not([disabled])'); if (nx2) nx2.click();
+    }
+    q('[data-action="submit-exam"]').click();
+    q('[data-action="home"]').click();
+    check('错题本 40 题', q('[data-action="open-wrongbook"]').querySelector('.t').textContent === '错题本 · 40 题',
+      q('[data-action="open-wrongbook"]').querySelector('.t').textContent);
+    q('[data-action="open-wrongbook"]').click();
+
+    // 逐条核对: 错题本里"上次错选"显示的文本, 必须等于当时点的那一项的文本
+    var ok = 0, bad = [];
+    document.querySelectorAll('.review-item').forEach(function (item) {
+      var meta = item.querySelector('.qmeta').textContent;
+      var m = meta.match(/(\S+) · (练习\S+?) · 第 (\d+) 题/);
+      var id = SEC[m[1] + '/' + m[2]] + '-' + m[3];
+      var rec = wrongIds.filter(function (w) { return w.id === id; })[0];
+      if (!rec) return;
+      var mineLine = [].filter.call(item.querySelectorAll('.review-line'), function (l) {
+        return l.textContent.indexOf('上次') === 0;
+      })[0];
+      var shownText = mineLine.querySelector('b').textContent;
+      // 去掉 "X. " 前缀后比较
+      var textOnly = shownText.replace(/^[A-D]\.\s*/, '');
+      if (textOnly === rec.chosenText) ok++; else bad.push(id + ' 期望[' + rec.chosenText + '] 实际[' + shownText + ']');
+    });
+    check('乱序下错题本记录的选项正确', bad.length === 0 && ok === 5, ok + '/5 正确' + (bad.length ? ' ' + bad.join('; ') : ''));
+
+    say('');
+    say(fails === 0 ? '全部通过 ✓' : (fails + ' 项失败 ✗'));
+  }
+  window.addEventListener('load', function () { setTimeout(run, 50); });
+})();
+</script>
+</body></html>

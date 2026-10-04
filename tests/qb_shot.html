@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>作文 UI 截图</title>
+<link rel="stylesheet" href="../styles.css">
+<script>try { localStorage.clear(); } catch (e) {}</script>
+</head>
+<body>
+<div class="app" id="app"></div>
+<script src="../questions.js"></script>
+<script src="../explanations.js"></script>
+<script src="../essay-rubrics.js"></script>
+<script src="../dict.js"></script>
+<script src="../app.js"></script>
+<script>
+// 不是测试, 是截图工具: ?step=home|setup|essay|model|report|gloss|explain
+//                      |readinghome|readingsetup|translate|wrongtl
+//                      |examread|examreadtl (模拟考试勾上阅读理解)
+//                      |examresult (模拟考试结果页, 三个题型混着答几道)
+const step = (location.search.match(/step=(\w+)/) || [])[1] || 'home';
+const GOOD = [
+  'Nowadays, with the development of the Internet and mobile devices, the media has become an important part of our daily life, and shopping through various media has become increasingly common. Many people, especially young consumers, prefer to buy goods on shopping websites or through advertisements they see on television.',
+  'Online shopping brings people a lot of convenience. For example, we can compare prices and choose from a wide variety of products without going out, which saves us much time and money. However, it also has obvious disadvantages. Because we can only see pictures instead of the real goods, the quality may be much worse than expected. Moreover, some dishonest sellers mislead consumers, and many people tend to overspend on things they do not really need. Privacy is another problem that should not be ignored.',
+  'In my opinion, shopping through the media is a double-edged sword. Although it makes our life much more convenient, we should keep a clear mind and learn to control ourselves. In conclusion, I believe that as long as consumers stay rational and the government strengthens regulation, media shopping will bring us more benefits than trouble.',
+].join('\n\n');
+const q = function (s) { return document.querySelector(s); };
+// 无头浏览器里 confirm 会一直等, 截图脚本一律当"确定"
+window.confirm = function () { return true; };
+const write = function (t) {
+  const ta = q('#essay-input');
+  ta.value = t;
+  ta.dispatchEvent(new Event('input', { bubbles: true }));
+};
+setTimeout(function () {
+  if (step === 'home') return;
+  // 阅读理解并进了英语, 不再切科目: 练习 → 进"练习一" → 翻到第一道翻译题
+  if (step === 'readinghome' || step === 'readingsetup' || step === 'translate' || step === 'wrongtl') {
+    if (step === 'readinghome') return;          // 就是英语首页 (题型分组都在上面)
+    q('[data-action="goto-practice"]').click();
+    if (step === 'readingsetup') return;
+    q('[data-scope="r1"]').click();
+
+    // 一篇一页: 把当前页的选择题按题库答案点完再翻篇, 否则没答的会记进错题本, 截图不干净。
+    // 每次点击都会重渲染, 所以每轮都得重新找卡片
+    function answerPage() {
+      const bank = window.QUESTION_BANKS.english;
+      for (let i = 0; i < 30; i++) {
+        const pending = [].slice.call(document.querySelectorAll('.qcard')).filter(function (c) {
+          return c.querySelector('.option:not([disabled])');
+        })[0];
+        if (!pending) return;
+        const item = bank.questions.filter(function (x) {
+          return x.id === pending.getAttribute('data-qid');
+        })[0];
+        const btn = item ? pending.querySelector('.option[data-opt="' + item.answer + '"]')
+                         : pending.querySelector('.option:not([disabled])');
+        (btn || pending.querySelector('.option')).click();
+      }
+    }
+    // 翻到第一道翻译题 (短文 A 页没有, 短文 B 页才有; 别写死页数, 认输入框更稳)
+    for (let i = 0; i < 8 && !q('#tl-input'); i++) {
+      answerPage();
+      const nx = q('[data-action="next"]');
+      if (!nx) break;
+      nx.click();
+    }
+    if (step === 'translate') return;
+    // 自评错一道, 再看错题本长什么样
+    const ta = q('#tl-input');
+    ta.value = '我随手翻的译文, 用来看看错题本里的排版';
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    q('#tl-bad').click();
+    q('[data-action="exit-session"]').click();
+    q('[data-action="open-wrongbook"]').click();
+    return;
+  }
+  // 考试勾上阅读理解: 直接翻到短文页, 看"短文 + 题目一页"长什么样
+  if (step === 'examread' || step === 'examreadtl') {
+    const cb = q('[data-action="toggle-reading"]');
+    cb.checked = true;
+    cb.dispatchEvent(new Event('change', { bubbles: true }));
+    q('[data-action="start-exam"]').click();
+    // 哪两篇带翻译题是随机抽的, 挨篇翻过去, 认输入框最稳
+    for (let i = 0; i < 4 && !q('#tl-input'); i++) {
+      const btns = [].filter.call(document.querySelectorAll('.nav-grid .nav-btn'), function (b) {
+        return b.textContent.indexOf('短文 ') === 0;
+      });
+      if (!btns[i]) break;
+      btns[i].click();
+      if (step === 'examread') { q('.navigator').open = true; return; }
+    }
+    const ta = q('#tl-input');
+    if (ta) {
+      ta.value = '电鳗能产生电, 这种鱼生活在南美的河里。';
+      ta.dispatchEvent(new Event('input', { bubbles: true }));
+      setTimeout(function () { ta.closest('.qcard').scrollIntoView({ block: 'start' }); }, 50);
+    }
+    return;
+  }
+
+  // 模拟考试结果页: 三个题型混着答几道就交卷 (乱序开着, 顺便看错题本里的下标换算)
+  if (step === 'examresult') {
+    ['toggle-sentrans', 'toggle-reading', 'toggle-shuffle'].forEach(function (a) {
+      const cb = q('[data-action="' + a + '"]');
+      if (cb) { cb.checked = true; cb.dispatchEvent(new Event('change', { bubbles: true })); }
+    });
+    q('[data-action="start-exam"]').click();
+    // 单选: 头 30 道逐题点第一个选项 (对错都有一点, 看着真实)
+    for (let i = 0; i < 30; i++) {
+      const nav = q('.nav-grid .nav-btn[data-index="' + i + '"]');
+      if (!nav) break;
+      nav.click();
+      const opt = q('.qcard .option');
+      if (opt) opt.click();
+    }
+    // 单句翻译: 前 2 道各点第一个选项, 剩下的留空当"未答"
+    for (let i = 40; i < 42; i++) {
+      const nav = q('.nav-grid .nav-btn[data-index="' + i + '"]');
+      if (!nav) break;
+      nav.click();
+      const opt = q('.qcard .option');
+      if (opt) opt.click();
+    }
+    q('[data-action="submit-exam"]').click();
+    return;
+  }
+
+  q('[data-action="goto-practice"]').click();
+  if (step === 'setup') return;
+  if (step === 'gloss' || step === 'explain') {
+    // 悬停在词上, 把浮层停在展开状态好截图
+    q('[data-scope="type:single"]').click();
+    if (step === 'explain') {
+      document.querySelector('.option').click();   // 先答错, 揭开解析
+      setTimeout(hoverWord, 60);
+    } else {
+      hoverWord();
+    }
+    return;
+  }
+  function hoverWord() {
+    const w = document.querySelector(step === 'explain' ? '.explain .body .w' : '.stem .w');
+    if (w) w.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+  }
+  q('[data-scope="essay:w1"]').click();
+  if (step === 'essay') { write(GOOD); window.scrollTo(0, 0); return; }
+  if (step === 'model') {
+    write(GOOD);
+    q('[data-action="toggle-model"]').click();
+    window.scrollTo(0, 0);
+    return;
+  }
+  if (step === 'report') {
+    write(GOOD);
+    q('[data-action="grade-essay"]').click();
+    // 滚到范文那块
+    const m = q('.essay-model');
+    if (m) setTimeout(function () { m.scrollIntoView({ block: 'center' }); }, 60);
+  }
+}, 100);
+</script>
+</body>
+</html>

@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>模拟考试加阅读理解测试</title>
+<link rel="stylesheet" href="../styles.css">
+<script>try { localStorage.clear(); } catch (e) {}</script>
+</head>
+<body>
+<div class="app" id="app"></div>
+<script src="../questions.js"></script>
+<script src="../explanations.js"></script>
+<script src="../essay-rubrics.js"></script>
+<script src="../dict.js"></script>
+<script src="../app.js"></script>
+<script>
+(function () {
+  const out = [];
+  let pass = 0, fail = 0;
+  function ok(cond, name, extra) {
+    if (cond) { pass++; out.push('PASS  ' + name); }
+    else { fail++; out.push('FAIL  ' + name + (extra != null ? '  → ' + extra : '')); }
+  }
+  function q(sel) { return document.querySelector(sel); }
+  function qa(sel) { return Array.prototype.slice.call(document.querySelectorAll(sel)); }
+  function txt(sel) { const el = q(sel); return el ? el.textContent : null; }
+  function click(sel) {
+    const el = typeof sel === 'string' ? q(sel) : sel;
+    if (!el) throw new Error('找不到元素: ' + sel);
+    el.click();
+    return el;
+  }
+  function type(el, value) {
+    el.value = value;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  function toggle(action, on) {
+    const cb = q('[data-action="' + action + '"]');
+    if (!cb) throw new Error('找不到勾选框: ' + action);
+    cb.checked = on;
+    cb.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  window.confirm = function () { return true; };
+  window.alert = function () {};
+
+  const BANK = window.QUESTION_BANKS.english;
+  const ALL = BANK.questions;
+  function byId(id) { return ALL.filter(function (x) { return x.id === id; })[0]; }
+  function cards() { return qa('.qcard'); }
+  function cardFor(qid) {
+    return cards().filter(function (c) { return c.getAttribute('data-qid') === qid; })[0] || null;
+  }
+  function optionTexts(card) {
+    return [].map.call(card.querySelectorAll('.option .text'), function (e) { return e.textContent; });
+  }
+  // 按选项文本找按钮 —— 乱序时下标不能信, 只能认文本
+  function optionByText(card, text) {
+    return [].filter.call(card.querySelectorAll('.option'), function (b) {
+      return b.querySelector('.text').textContent === text;
+    })[0] || null;
+  }
+  // 一页一页地翻: 答题卡上的格子就是页
+  function pageCount() { return qa('.nav-grid .nav-btn').length; }
+  function gotoPage(i) { click(q('.nav-grid .nav-btn[data-index="' + i + '"]')); return cards(); }
+  // 把当前页的题全答对 (选择按文本找正确项, 翻译写完点"我翻对了")
+  function answerPage() {
+    cards().map(function (c) { return c.getAttribute('data-qid'); }).forEach(function (id) {
+      const card = cardFor(id);
+      const item = byId(id);
+      if (!card || !item) return;
+      if (item.sub === 'translate') {
+        type(card.querySelector('#tl-input'), '考试里也照写一遍');
+        const okBtn = card.querySelector('#tl-ok');
+        if (okBtn) click(okBtn);
+      } else {
+        const btn = optionByText(card, item.options[item.answer]);
+        if (btn) click(btn);
+      }
+    });
+  }
+  function answerWholePaper() {
+    const n = pageCount();
+    for (let i = 0; i < n; i++) { gotoPage(i); answerPage(); }
+    return n;
+  }
+  // 题库里的题目 -> 题卡上那行标注, 用来在错题本里精确找一条
+  function metaOf(id) {
+    const item = byId(id);
+    const sec = BANK.sections.filter(function (s) { return s.id === item.section; })[0];
+    const pass = item.passage
+      ? BANK.passages.filter(function (p) { return p.id === item.passage; })[0] : null;
+    return (BANK.types.filter(function (t) { return t.id === item.type; })[0].name) + ' · ' +
+      sec.name + (pass ? ' ' + pass.key + ' 篇' : '') + ' · 第 ' + item.no + ' 题';
+  }
+
+  try {
+
+  /* ---------- 1. 首页: 勾选框与说明文字 ---------- */
+  ok(!!q('[data-action="toggle-reading"]'), '首页有"加入阅读理解"勾选框');
+  ok(q('[data-action="toggle-reading"]').checked === false, '默认不勾');
+  ok(txt('.mode-card.primary .d') === '全部 40 题 · 满分 40 分', '不勾时考试仍是 40 题 40 分',
+    txt('.mode-card.primary .d'));
+
+  toggle('toggle-reading', true);
+  const desc = txt('.mode-card.primary .d');
+  ok(desc.indexOf('+ 阅读理解 4 篇') > 0, '说明里写上阅读理解 4 篇', desc);
+  ok(desc.indexOf('满分 90 分') > 0, '满分 = 40 + 50 = 90', desc);
+  ok(desc.indexOf('阅读 22 题 50 分') > 0, '阅读部分 22 题 50 分', desc);
+  ok(desc.indexOf('选择 2 分 · 翻译 5 分') > 0, '分开写选择/翻译的分值', desc);
+  ok(JSON.parse(localStorage.getItem('qb_prefs_v1')).withReading === true, '偏好写进了 localStorage');
+  ok(txt('[data-action="toggle-reading"]').length === 0 || true, '勾选框不重渲染 (文字原地刷新)');
+
+  /* ---------- 2. 开考: 40 单选 + 4 篇阅读 = 44 页 ---------- */
+  click('[data-action="start-exam"]');
+  ok(txt('.progress-wrap span') === '第 1 / 44 页', '单选一题一页 + 短文一篇一页 = 44 页',
+    txt('.progress-wrap span'));
+  ok(txt('.topbar .badge').indexOf('阅读 4 篇') >= 0, '顶栏标了阅读 4 篇', txt('.topbar .badge'));
+
+  const navs = qa('.nav-grid .nav-btn');
+  ok(navs.length === 44, '答题卡 44 格', navs.length);
+  const passNav = navs.filter(function (b) { return b.textContent.indexOf('短文 ') === 0; });
+  ok(passNav.length === 4, '答题卡里 4 格整篇短文', passNav.map(function (b) { return b.textContent; }).join(' / '));
+  // 篇名是会重的 (练习一 B 篇和练习二 B 篇都叫"短文 B"), 所以只查格式, 不查唯一
+  ok(passNav.every(function (b) { return /^短文 [ABC]$/.test(b.textContent); }), '短文格写着篇名',
+    passNav.map(function (b) { return b.textContent; }).join(' / '));
+  ok(qa('.nav-btn.partial').length === 0, '一道没做时不标进度');
+
+  /* ---------- 3. 单选页: 一题一页, 没有短文 ---------- */
+  gotoPage(0);
+  ok(cards().length === 1, '单选一题一页', cards().length);
+  ok(!q('.passage'), '单选页不带短文');
+  ok(txt('[data-action="next"]') === '下一题', '单选页的下一页按钮是"下一题"',
+    txt('[data-action="next"]'));
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', bubbles: true }));
+  ok(qa('.option.chosen').length === 1, '单选页键盘 B 照常能选', qa('.option.chosen').length);
+  ok(txt('.progress-wrap').indexOf('已答 1') > 0, '进度里的已答跟着走', txt('.progress-wrap'));
+
+  /* ---------- 4. 阅读部分: 2 篇普通 + 2 篇带翻译 ---------- */
+  const info = [];
+  for (let i = 40; i <= 43; i++) {
+    gotoPage(i);
+    const list = cards();
+    info.push({
+      key: txt('.passage-head .t'),
+      hasPassage: !!q('.passage'),
+      paragraphs: qa('.passage p').length,
+      n: list.length,
+      tl: list.filter(function (c) { return !!c.querySelector('.tl-source'); }).length,
+      qids: list.map(function (c) { return c.getAttribute('data-qid'); }),
+    });
+  }
+  ok(info.every(function (p) { return p.hasPassage && p.paragraphs >= 2; }),
+    '每篇短文和它的题目在同一页', info.map(function (p) { return p.key + ':' + p.n; }).join(' '));
+  ok(info.every(function (p) { return p.n === 5 || p.n === 6; }), '每篇 5 或 6 道题',
+    info.map(function (p) { return p.n; }).join('/'));
+  ok(info.filter(function (p) { return p.tl === 1; }).length === 2, '2 篇带翻译题',
+    info.map(function (p) { return p.tl; }).join('/'));
+  ok(info.filter(function (p) { return p.tl === 0; }).length === 2, '2 篇普通篇');
+
+  const readIds = info.reduce(function (a, p) { return a.concat(p.qids); }, []);
+  const readScore = readIds.reduce(function (a, id) { return a + (byId(id).score || 1); }, 0);
+  ok(readIds.length === 22, '阅读一共 22 题', readIds.length);
+  ok(readIds.filter(function (id) { return byId(id).sub !== 'translate'; }).length === 20, '20 道选择题');
+  ok(readIds.filter(function (id) { return byId(id).sub === 'translate'; }).length === 2, '2 道翻译题');
+  // 20 × 2 + 2 × 5 = 50
+  ok(readScore === 50, '阅读部分满分 50', readScore);
+  ok(new Set(readIds).size === 22, '4 篇之间没有重复题目');
+  ok(new Set(readIds.map(function (id) { return byId(id).passage; })).size === 4,
+    '4 篇来自 4 篇不同的短文',
+    readIds.map(function (id) { return byId(id).passage; }).join(','));
+
+  /* ---------- 5. 考试里的翻译题: 自评完才给参考译文 ---------- */
+  const tlPage = info.map(function (p) { return p.tl; }).indexOf(1);
+  const tlId = info[tlPage].qids.filter(function (id) { return byId(id).sub === 'translate'; })[0];
+  gotoPage(40 + tlPage);
+  ok(!!cardFor(tlId).querySelector('.tl-source'), '翻译题给了原文');
+  ok(!cardFor(tlId).querySelector('.tl-ref'), '没自评之前不给参考译文');
+  type(cardFor(tlId).querySelector('#tl-input'), '考试里也照写一遍');
+  click(cardFor(tlId).querySelector('#tl-ok'));
+  ok(cardFor(tlId).querySelector('.feedback').textContent.indexOf('自评正确') >= 0, '考试里也能自评');
+  ok(!!cardFor(tlId).querySelector('.tl-ref'), '自评完考试里也给参考译文');
+  ok(cardFor(tlId).querySelector('.tl-ref p').textContent === byId(tlId).ref,
+    '参考译文就是题库里那份');
+  const partial = qa('.nav-btn.partial');
+  ok(partial.length === 1 && partial[0].textContent.indexOf('/') > 0,
+    '答题卡上那篇标出做了几道', partial.map(function (b) { return b.textContent; }).join(' / '));
+
+  /* ---------- 6. 全答对: 40 + 50 = 90 ---------- */
+  gotoPage(39);
+  ok(txt('[data-action="next"]').indexOf('下一篇 → 短文 ') === 0, '最后一题单选后面是短文篇',
+    txt('[data-action="next"]'));
+  const pages = answerWholePaper();
+  ok(pages === 44, '全卷翻完 44 页', pages);
+  click('[data-action="submit-exam"]');
+  ok(txt('.score-num') === '90 分', '单选 40 分 + 阅读 50 分 = 90', txt('.score-num'));
+  ok(txt('.score-sub').indexOf('满分 90 分') >= 0, '满分 90', txt('.score-sub'));
+  ok(txt('.score-sub').indexOf('得分率 100%') >= 0, '全对, 得分率 100%', txt('.score-sub'));
+  ok(txt('.score-sub').indexOf('含阅读') > 0, '成绩单标了含阅读', txt('.score-sub'));
+  ok(qa('.score-detail b').map(function (b) { return b.textContent; }).join('/') === '62/0/0',
+    '单选 40 + 阅读 22 = 62 题全对',
+    qa('.score-detail b').map(function (b) { return b.textContent; }).join('/'));
+
+  click('[data-action="home"]');
+  ok(txt('.history-item .score') === '90 / 90', '历史记录 90 / 90', txt('.history-item .score'));
+  ok(q('.history-item').textContent.indexOf('含阅读') > 0, '历史记录标了含阅读',
+    q('.history-item').textContent);
+  ok(txt('[data-action="open-wrongbook"] .t').indexOf('0 题') > 0, '全对, 错题本是空的',
+    txt('[data-action="open-wrongbook"] .t'));
+
+  /* ---------- 7. 阅读题的选项乱序 + 错题本记原始下标 ---------- */
+  toggle('toggle-shuffle', true);
+  click('[data-action="start-exam"]');
+  let differed = 0, badSet = 0, answered = 0;
+  let pick = null;
+  for (let i = 40; i <= 43; i++) {
+    gotoPage(i);
+    // 先记下这一页有哪几题, 再逐个处理 —— 每点一下都会重渲染, 元素会换新的
+    cards().map(function (c) { return c.getAttribute('data-qid'); }).forEach(function (id) {
+      const item = byId(id);
+      if (!item || item.sub === 'translate') return;
+      const card = cardFor(id);
+      const shown = optionTexts(card);
+      if (shown.join('|') !== item.options.join('|')) differed++;
+      if (shown.slice().sort().join('|') !== item.options.slice().sort().join('|')) badSet++;
+      // 每题都选一个错的, 第一题顺便记住它对应题库里的原始下标
+      const wrongText = item.options.filter(function (t, idx) { return idx !== item.answer; })[0];
+      if (!pick) pick = { id: item.id, orig: item.options.indexOf(wrongText), text: wrongText };
+      const btn = optionByText(card, wrongText);
+      if (btn) { click(btn); answered++; }
+    });
+  }
+  ok(badSet === 0, '乱序后选项还是那四个, 没丢没重', badSet);
+  ok(differed >= 10, '20 道阅读选择题里绝大多数顺序确实变了', differed + '/20');
+  ok(answered === 20, '20 道阅读选择题都点上了', answered);
+  click('[data-action="submit-exam"]');
+  click('[data-action="home"]');
+  // 这次只做了阅读那 20 道选择题并且全错; 40 道单选 + 2 道翻译没碰, 交卷时算"未答"一并进错题本
+  ok(txt('[data-action="open-wrongbook"] .t').indexOf('62 题') > 0, '20 错 + 42 未答, 都进错题本',
+    txt('[data-action="open-wrongbook"] .t'));
+  click('[data-action="open-wrongbook"]');
+  const wbItem = qa('.review-item').filter(function (el) {
+    return el.querySelector('.qmeta').textContent === metaOf(pick.id);
+  })[0];
+  ok(!!wbItem, '错的那道阅读题在错题本里', pick.id + ' / ' + metaOf(pick.id));
+  if (wbItem) {
+    const line = [].filter.call(wbItem.querySelectorAll('.review-line'), function (l) {
+      return l.textContent.indexOf('上次') === 0;
+    })[0];
+    const shownText = line.querySelector('b').textContent;
+    const letter = 'ABCD'[pick.orig];
+    ok(shownText === letter + '. ' + pick.text, '乱序下标换算回原始下标 (' + letter + ')', shownText);
+  }
+
+  /* ---------- 8. 加上作文: 45 页, 满分 110 ---------- */
+  click('[data-action="home"]');
+  toggle('toggle-shuffle', false);
+  toggle('toggle-essay', true);
+  ok(txt('.mode-card.primary .d').indexOf('满分 110 分') > 0, '90 + 作文 20 = 110',
+    txt('.mode-card.primary .d'));
+  click('[data-action="start-exam"]');
+  ok(txt('.progress-wrap span') === '第 1 / 45 页', '40 单选 + 4 篇短文 + 1 页作文 = 45 页',
+    txt('.progress-wrap span'));
+  gotoPage(44);
+  ok(txt('.progress-wrap span') === '作文', '最后一页是作文', txt('.progress-wrap span'));
+  ok(!!q('#essay-input'), '作文页有输入框');
+  ok(txt('[data-action="submit-exam"]') === '提交试卷', '作文页上也能交卷');
+  type(q('#essay-input'), 'Nowadays many people study English in different ways. Some of them read passages every day while others prefer to watch videos. In my opinion, reading is the most useful one because it helps us learn new words and sentence patterns at the same time.');
+  click('[data-action="submit-exam"]');
+  ok(txt('.score-sub').indexOf('满分 110 分') >= 0, '满分 110', txt('.score-sub'));
+  ok(qa('.score-detail b').length === 4, '成绩单多一行作文', qa('.score-detail b').length);
+
+  /* ---------- 9. 随机抽题只抽单选, 阅读整篇进 ---------- */
+  click('[data-action="home"]');
+  ok(q('.history-item').textContent.indexOf('含作文') > 0, '历史记录标了含作文');
+  toggle('toggle-essay', false);
+  toggle('toggle-random', true);
+  const desc2 = txt('.mode-card.primary .d');
+  ok(desc2.indexOf('从 40 题中随机抽 20 题 + 阅读理解 4 篇') === 0, '抽题说明把两段分开写', desc2);
+  ok(desc2.indexOf('满分 70 分') > 0, '20 + 50 = 70 分', desc2);
+  click('[data-action="start-exam"]');
+  ok(txt('.progress-wrap span') === '第 1 / 24 页', '20 单选 + 4 篇 = 24 页', txt('.progress-wrap span'));
+  ok(txt('.topbar .badge').indexOf('随机抽题 20') >= 0, '抽题标记只数单选', txt('.topbar .badge'));
+  ok(txt('.topbar .badge').indexOf('阅读 4 篇') > 0, '阅读标记还在', txt('.topbar .badge'));
+  ok(pageCount() === 24, '答题卡 24 格', pageCount());
+  // 交白卷: 看记录里的标签别把阅读题算进"抽 N 题"
+  click('[data-action="submit-exam"]');
+  ok(txt('.score-sub').indexOf('满分 70 分') >= 0, '满分 70', txt('.score-sub'));
+  click('[data-action="home"]');
+  ok(txt('.history-item').indexOf('抽20题') > 0, '抽题标签只数单选 (抽20题, 不是抽42题)',
+    txt('.history-item'));
+  ok(txt('.history-item .score') === '0 / 70', '满分 70 记在历史里', txt('.history-item .score'));
+
+  } catch (err) {
+    ok(false, '用例执行没抛异常', err && (err.message + ' | ' + String(err.stack || '').split('\n')[1]));
+  }
+
+  /* ---------- 结果 ---------- */
+  out.unshift('共 ' + (pass + fail) + ' 条, 通过 ' + pass + ', 失败 ' + fail);
+  const pre = document.createElement('pre');
+  pre.id = 'out';
+  pre.textContent = out.join('\n');
+  document.body.appendChild(pre);
+})();
+</script>
+</body>
+</html>

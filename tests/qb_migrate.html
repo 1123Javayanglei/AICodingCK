@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>v1 迁移测试</title>
+<link rel="stylesheet" href="../styles.css">
+<script>
+// v1 时代只有英语一个科目, 数据是扁平的; 升级后应整体落到 english 桶里
+try {
+  localStorage.clear();
+  localStorage.setItem('qb_wrong_v1', JSON.stringify({
+    'lx1-13': { count: 3, lastAnswer: 2, lastAt: 1700000000000 },
+    'lx2-4':  { count: 1, lastAnswer: 0, lastAt: 1700000001000 }
+  }));
+  localStorage.setItem('qb_history_v1', JSON.stringify([
+    { at: 1700000002000, mode: 'exam', shuffled: false, sampled: false, total: 40, correct: 35, seconds: 600, wrongIds: [] }
+  ]));
+  localStorage.setItem('qb_prefs_v1', JSON.stringify({ shuffleOptions: true }));
+} catch (e) {}
+</script>
+</head>
+<body>
+<div class="app" id="app"></div>
+<script src="../questions.js"></script>
+<script src="../explanations.js"></script>
+<script src="../dict.js"></script>
+<script src="../app.js"></script>
+<script>
+(function () {
+  const out = [];
+  let pass = 0, fail = 0;
+  function ok(cond, name, extra) {
+    if (cond) { pass++; out.push('PASS  ' + name); }
+    else { fail++; out.push('FAIL  ' + name + (extra != null ? '  → ' + extra : '')); }
+  }
+  function q(sel) { return document.querySelector(sel); }
+  function qa(sel) { return Array.prototype.slice.call(document.querySelectorAll(sel)); }
+  function txt(sel) { const el = q(sel); return el ? el.textContent : null; }
+  function stat(i) { const els = qa('.stat b'); return els[i] ? els[i].textContent : null; }
+  window.confirm = function () { return true; };
+  window.alert = function () {};
+
+  try {
+    /* ---- 迁移后的首页 ---- */
+    ok(stat(1) === '2', '旧错题本的 2 题迁移到英语', stat(1));
+    ok(stat(2) === '35 分', '旧成绩记录迁移到英语', stat(2));
+    ok(!!q('[data-action="toggle-shuffle"]'), '旧偏好(选项乱序)保留');
+    ok(q('[data-action="toggle-shuffle"]').checked === true, '乱序复选框是勾上的');
+
+    /* ---- 存储结构 ---- */
+    const w = JSON.parse(localStorage.getItem('qb_wrong_v2') || 'null');
+    ok(!!w && Object.keys(w).join(',') === 'english', 'v2 只有一个 english 桶', w && Object.keys(w).join(','));
+    ok(!!w && Object.keys(w.english).sort().join(',') === 'lx1-13,lx2-4', '旧键原样搬过来', w && Object.keys(w.english).sort().join(','));
+    ok(!!w && w.english['lx1-13'].count === 3, '错误次数保留', w && w.english['lx1-13'].count);
+    ok(!!w && w.english['lx1-13'].lastAnswer === 2, '上次选的选项保留', w && w.english['lx1-13'].lastAnswer);
+
+    const h = JSON.parse(localStorage.getItem('qb_history_v2') || 'null');
+    ok(!!h && !!h.english && h.english.length === 1 && h.english[0].correct === 35, '成绩记录迁移正确');
+    ok(!!h && !h['数据结构'], '没有凭空造出别的科目桶', h && Object.keys(h).join(','));
+
+    ok(localStorage.getItem('qb_wrong_v1') !== null, '旧键保留, 没有删数据');
+
+    /* ---- 错题本页面能正确渲染迁移来的题 ---- */
+    q('[data-action="open-wrongbook"]').click();
+    ok(txt('.topbar .title') === '错题本', '进入错题本', txt('.topbar .title'));
+    const items = qa('.review-item');
+    ok(items.length === 2, '渲染 2 条错题', items.length);
+    const all = items.map(function (it) { return it.textContent; }).join('\n');
+    ok(all.indexOf('错 3 次') >= 0, '显示错误次数', all.slice(0, 160));
+    ok(all.indexOf('C. Until') >= 0, '上次选的 C 能对上原始选项', all.slice(0, 200));
+    ok(all.indexOf('第 13 题') >= 0 && all.indexOf('第 4 题') >= 0, '题号标注正确', all.slice(0, 200));
+
+    /* ---- 重复加载不覆盖新数据 ---- */
+    ok(localStorage.getItem('qb_wrong_v2') !== null, 'v2 已写入, 下次启动不会再迁移');
+  } catch (err) {
+    fail++;
+    out.push('FAIL  抛异常: ' + (err && err.stack ? err.stack : err));
+  }
+
+  out.unshift('==== ' + pass + ' passed, ' + fail + ' failed ====');
+  const box = document.createElement('pre');
+  box.id = 'testout';
+  box.textContent = out.join('\n');
+  document.body.appendChild(box);
+})();
+</script>
+</body>
+</html>
