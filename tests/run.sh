@@ -21,7 +21,7 @@ if [ -z "$EDGE" ]; then
   exit 2
 fi
 
-HTML_TESTS="smoke4 smoke5 smoke8 smoke9 smoke10 qb_subjects qb_migrate qb_essay qb_dict qb_reading qb_exam_reading qb_exam_sentrans qb_ds qb_ds_exam"
+HTML_TESTS="smoke4 smoke5 smoke8 smoke9 smoke10 qb_subjects qb_migrate qb_essay qb_dict qb_reading qb_exam_reading qb_exam_sentrans qb_ds qb_ds_exam qb_os qb_os_exam"
 if [ $# -gt 0 ]; then
   # build 不是 HTML 用例, 从列表里剔掉, 免得报一句"build.html 不存在"
   HTML_TESTS=$(for a in $*; do [ "$a" = "build" ] || echo "$a"; done)

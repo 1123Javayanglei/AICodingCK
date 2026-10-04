@@ -11,6 +11,8 @@
 <script src="../questions.js"></script>
 <script src="../explanations.js"></script>
 <script>
+// 这个用例只关心"两个科目互相隔离", 把题库里别的真实科目先摘掉, 免得断言跟着它们变
+delete window.QUESTION_BANKS['操作系统'];
 // 注入一个合成的第二科目, 题目 id 故意和英语重名 (lx1-1 / lx1-2 ...), 用来验证隔离
 window.QUESTION_BANKS['数据结构'] = {
   name: '数据结构',

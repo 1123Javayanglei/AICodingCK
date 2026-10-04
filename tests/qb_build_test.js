@@ -471,7 +471,7 @@ if (r.code === 0) {
 
 // 认不出来的词忽略 (不报错), 不影响别的题型
 fs.writeFileSync(path.join(ROOT, '题库', '操作系统.txt'), [
-  '# 设置: 简答每题 8 分, 单选每题 3 分',
+  '# 设置: 连线每题 8 分, 单选每题 3 分',
   '练习一',
   '1. 单选一 ____。',
   'A. 甲        B. 乙        C. 丙        D. 丁',
@@ -483,7 +483,7 @@ if (r.code === 0) {
   const b = readBanks()['操作系统'];
   ok(b.questions[0].score === 3, '"单选每题 3 分"照样生效', b.questions[0].score);
   ok(b.settings.typeScores.single === 3 && !b.settings.typeScores.judge,
-    '"简答"这种不认识的词不落进 typeScores', JSON.stringify(b.settings.typeScores));
+    '"连线"这种不认识的词不落进 typeScores', JSON.stringify(b.settings.typeScores));
 }
 
 // 老写法 (选择每题 N 分) 继续管用, 只是不进 typeScores
@@ -501,6 +501,177 @@ if (r.code === 0) {
   ok(b.questions[0].score === 4 && JSON.stringify(b.settings.typeScores) === '{}',
     '"选择每题 4 分"走老路, 不写进 typeScores',
     b.questions[0].score + '/' + JSON.stringify(b.settings.typeScores));
+}
+
+/* ======== 场景 12: 解答题 / 综合计算题 (参考答案直接摊开给看) ======== */
+fs.writeFileSync(path.join(ROOT, '题库', '操作系统.txt'), [
+  '练习一（解答题）',
+  '1. 说说什么是进程 ____？',
+  '参考答案：',
+  '  进程是程序的一次执行过程。',
+  '  它也是资源分配的单位。',
+  '2. 再看看线程 ____。',
+  '参考答案：',
+  '  线程是调度单位。',
+  '  - 第一条',
+  '  - 第二条',
+  '练习二（综合计算题）',
+  '1. 算一算 ____。',
+  '参考答案：',
+  '  表格如下：',
+  '  | 页 | 块 |',
+  '  | --- | --- |',
+  '  | 0 | 5 |',
+  '  代码这样写：',
+  '  ```c',
+  '  while (1) {',
+  '      wait();',
+  '  }',
+  '  ```',
+].join('\n'), 'utf8');
+r = build();
+ok(r.code === 0, '解答题/综合计算题能生成', r.out);
+if (r.code === 0) {
+  const b = readBanks()['操作系统'];
+  ok(b.types.map((t) => t.id).join(',') === 'answer,compute', '两种新题型都认出来了',
+    b.types.map((t) => t.id + ':' + t.name).join(','));
+  ok(b.types.every((t) => t.reveal === true && t.exam === false),
+    '两种新题型标了 reveal, 且不进模拟考试', JSON.stringify(b.types));
+  ok(b.questions.every((q) => q.sub === 'reveal'), '题目都标成 reveal',
+    b.questions.map((q) => q.sub).join(','));
+  ok(b.questions.every((q) => q.score === 0), '看答案的题一律 0 分',
+    b.questions.map((q) => q.score).join(','));
+  ok(b.questions[0].ref === '进程是程序的一次执行过程。\n它也是资源分配的单位。',
+    '一段一行, 换行留着', JSON.stringify(b.questions[0].ref));
+  ok(b.questions[0].stem === '说说什么是进程 ____？', '题干没把参考答案吞进去', b.questions[0].stem);
+  ok(b.questions[1].ref === '线程是调度单位。\n- 第一条\n- 第二条', '列表项也是一行一条',
+    JSON.stringify(b.questions[1].ref));
+  const t = b.questions[2];
+  ok(t.ref.indexOf('\n| 页 | 块 |\n') > 0 && t.ref.indexOf('\n| --- |') > 0,
+    '表格原样留着', JSON.stringify(t.ref));
+  ok(t.ref.indexOf('\nwhile (1) {\n    wait();\n}\n```') > 0,
+    '代码块整体剥掉外层缩进, 里面的缩进没被压平', JSON.stringify(t.ref));
+  ok(b.sections.map((s) => s.type).join(',') === 'answer,compute', '分节挂在各自的题型上');
+}
+
+// 解答题忘了写参考答案 → 报错 (这种题除了答案什么都没有)
+fs.writeFileSync(path.join(ROOT, '题库', '操作系统.txt'), [
+  '练习一（解答题）',
+  '1. 忘了写参考答案 ____。',
+].join('\n'), 'utf8');
+r = build();
+ok(r.code === 1 && r.out.indexOf('缺少 "参考答案：" 行') >= 0,
+  '解答题缺参考答案时报错', r.out.trim().slice(0, 200));
+
+/* ======== 场景 13: 填空题自动判分 (题库里的开关, 不开的科目照旧自评) ======== */
+const BLANK_BODY = [
+  '练习一（填空题）',
+  '1. 填空一 ____。',
+  '参考答案：甲',
+].join('\n');
+
+fs.writeFileSync(path.join(ROOT, '题库', '操作系统.txt'),
+  '# 设置: 填空自动判分\n' + BLANK_BODY + '\n', 'utf8');
+r = build();
+ok(r.code === 0, '写了"填空自动判分"能生成', r.out);
+if (r.code === 0) {
+  const b = readBanks()['操作系统'];
+  ok(b.settings.blankAuto === true, '"填空自动判分"读成 blankAuto', JSON.stringify(b.settings));
+  ok(b.settings.examEnabled === true, '没写"不加入模拟考试"还是进考试 (两个开关互不干扰)');
+}
+
+// "填空题自动判分"多一个"题"字也认
+fs.writeFileSync(path.join(ROOT, '题库', '操作系统.txt'),
+  '# 设置: 不加入模拟考试, 填空题自动判分\n' + BLANK_BODY + '\n', 'utf8');
+r = build();
+ok(r.code === 0, '多写个"题"字也能生成', r.out);
+if (r.code === 0) {
+  const b = readBanks()['操作系统'];
+  ok(b.settings.blankAuto === true && b.settings.examEnabled === false,
+    '"填空题自动判分"照样认, 且两条设置各管各的', JSON.stringify(b.settings));
+}
+
+// 没写这句的科目不能带上这个开关 (英语没有文字题, 数据结构写了才有)
+fs.writeFileSync(path.join(ROOT, '题库', '操作系统.txt'), BLANK_BODY + '\n', 'utf8');
+r = build();
+ok(r.code === 0, '没写设置行也能生成', r.out);
+if (r.code === 0) {
+  const b = readBanks()['操作系统'];
+  ok(!b.settings.blankAuto, '没写这句就没有 blankAuto (照旧自评)', JSON.stringify(b.settings));
+}
+
+// 操作系统那行的真实写法: 分值 / 抽题 / 自动判分四个设置挤在一行里
+fs.writeFileSync(path.join(ROOT, '题库', '操作系统.txt'), [
+  '# 设置: 单选每题 2 分, 填空每题 2 分, 随机抽 15 题, 填空自动判分',
+  BLANK_BODY,
+  '练习二（单选题）',
+  '1. 单选一 ____。',
+  'A. 甲        B. 乙        C. 丙        D. 丁',
+  '答案：A',
+].join('\n') + '\n', 'utf8');
+r = build();
+ok(r.code === 0, '四个设置挤在一行也能生成', r.out);
+if (r.code === 0) {
+  const b = readBanks()['操作系统'];
+  ok(b.settings.typeScores.single === 2 && b.settings.typeScores.blank === 2 &&
+    b.settings.randomPick === 15 && b.settings.blankAuto === true && b.settings.examEnabled === true,
+    '四个设置各归各的, 互不干扰', JSON.stringify(b.settings));
+  ok(b.questions.map((q) => q.score).join(',') === '2,2', '单选和填空各 2 分',
+    b.questions.map((q) => q.score).join(','));
+}
+
+// 数据结构那行的真实写法: 填空机判, 名词解释直接看答案, 五个设置挤在一行
+fs.writeFileSync(path.join(ROOT, '题库', '数据结构.txt'), [
+  '# 设置: 单选每题 2 分, 填空每题 2 分, 随机抽 10 题, 填空自动判分, 名词解释直接看答案',
+  BLANK_BODY,
+  '练习二（名词解释）',
+  '1. 名词一',
+  '参考答案：定义一',
+].join('\n') + '\n', 'utf8');
+r = build();
+ok(r.code === 0, '数据结构那行也能生成', r.out);
+if (r.code === 0) {
+  const b = readBanks()['数据结构'];
+  ok(b.settings.typeScores.single === 2 && b.settings.typeScores.blank === 2 &&
+    b.settings.randomPick === 10 && b.settings.blankAuto === true &&
+    JSON.stringify(b.settings.revealTypes) === '["term"]',
+    '五个设置各归各的', JSON.stringify(b.settings));
+  const blank = b.questions.filter((q) => q.type === 'blank')[0];
+  const term = b.questions.filter((q) => q.type === 'term')[0];
+  ok(blank.sub === 'text' && blank.score === 2, '填空照旧是自评文字题 + 2 分',
+    blank.sub + '/' + blank.score);
+  ok(term.sub === 'reveal' && term.score === 0 && term.ref === '定义一',
+    '"直接看答案"的题型改成 reveal + 0 分, 参考答案原样留着',
+    term.sub + '/' + term.score);
+  const termType = b.types.filter((t) => t.id === 'term')[0];
+  ok(termType && termType.reveal === true, '题型表里也标上 reveal', JSON.stringify(termType));
+}
+
+// "<题型>直接看答案" 认不出来就忽略 (不能瞎改题); "给答案"也认
+fs.writeFileSync(path.join(ROOT, '题库', '数据结构.txt'), [
+  '# 设置: 随便什么直接看答案',
+  BLANK_BODY,
+].join('\n') + '\n', 'utf8');
+r = build();
+ok(r.code === 0, '认不出来的题型词也能生成', r.out);
+if (r.code === 0) {
+  const b = readBanks()['数据结构'];
+  ok(!b.settings.revealTypes, '认不出来就不带 revealTypes', JSON.stringify(b.settings));
+  ok(b.questions.every((q) => q.sub === 'text' && q.score === 1), '题一个没动',
+    b.questions.map((q) => q.sub + '/' + q.score).join(','));
+}
+fs.writeFileSync(path.join(ROOT, '题库', '数据结构.txt'), [
+  '# 设置: 名词解释直接给答案',
+  '练习一（名词解释）',
+  '1. 名词一',
+  '参考答案：定义一',
+].join('\n') + '\n', 'utf8');
+r = build();
+ok(r.code === 0, '写"直接给答案"也认', r.out);
+if (r.code === 0) {
+  const b = readBanks()['数据结构'];
+  ok(JSON.stringify(b.settings.revealTypes) === '["term"]' &&
+    b.questions[0].sub === 'reveal', '"直接给答案"读成同一个开关', JSON.stringify(b.settings));
 }
 
 console.log('\n==== ' + pass + ' passed, ' + fail + ' failed ====');

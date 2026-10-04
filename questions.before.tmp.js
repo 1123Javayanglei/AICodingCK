@@ -2739,13 +2739,10 @@ window.QUESTION_BANKS = {
       "translateScore": 5,
       "typeScores": {
         "single": 2,
-        "blank": 2
+        "blank": 2,
+        "term": 6
       },
-      "randomPick": 10,
-      "blankAuto": true,
-      "revealTypes": [
-        "term"
-      ]
+      "randomPick": 10
     },
     types: [
       {
@@ -2760,8 +2757,7 @@ window.QUESTION_BANKS = {
       {
         "id": "term",
         "name": "名词解释",
-        "exam": false,
-        "reveal": true
+        "exam": false
       }
     ],
     sections: [
@@ -3322,9 +3318,9 @@ window.QUESTION_BANKS = {
         "stem": "逻辑结构",
         "options": [],
         "answer": null,
-        "sub": "reveal",
+        "sub": "text",
         "ref": "描述数据元素间的抽象关系（如线性、树形），与计算机无关；存储结构和物理结构依赖于具体实现。",
-        "score": 0
+        "score": 6
       },
       {
         "id": "lx3-2",
@@ -3334,9 +3330,9 @@ window.QUESTION_BANKS = {
         "stem": "顺序表",
         "options": [],
         "answer": null,
-        "sub": "reveal",
+        "sub": "text",
         "ref": "顺序表的一个存储结点存储线性表的一个结点的内容，即数据元素，所有存储结点按照相应数据元素间的逻辑关系决定的次序依次排列。",
-        "score": 0
+        "score": 6
       },
       {
         "id": "lx3-3",
@@ -3346,9 +3342,9 @@ window.QUESTION_BANKS = {
         "stem": "链式存储结构",
         "options": [],
         "answer": null,
-        "sub": "reveal",
+        "sub": "text",
         "ref": "为了正确表示结点间的逻辑关系，在存储每个结点值的同时，还必须存储指示其直接后继结点的地址（或位置），称为指针（pointer）或链（link），这两部分组成了链表中的结点结构。",
-        "score": 0
+        "score": 6
       },
       {
         "id": "lx3-4",
@@ -3358,9 +3354,9 @@ window.QUESTION_BANKS = {
         "stem": "双向链表",
         "options": [],
         "answer": null,
-        "sub": "reveal",
+        "sub": "text",
         "ref": "双向链表（Double Linked List）指的是在保存结点（node）数据的同时，构成链表的每个结点中设立两个指针域：一个指向其直接前趋的指针域 prior，一个指向其直接后继的指针域 next。这样形成的链表中有两个方向不同的链，故称为双向链表。",
-        "score": 0
+        "score": 6
       },
       {
         "id": "lx3-5",
@@ -3370,9 +3366,9 @@ window.QUESTION_BANKS = {
         "stem": "二叉树",
         "options": [],
         "answer": null,
-        "sub": "reveal",
+        "sub": "text",
         "ref": "二叉树（binary tree）是结点（node）的一个有限集合，这个集合或者为空，或者是由一个根结点以及两棵互不相交的、分别称为这个根的左子树和右子树的二叉树组成。左子树和右子树的根分别称为此二叉树根结点的左孩子结点和右孩子结点。",
-        "score": 0
+        "score": 6
       },
       {
         "id": "lx3-6",
@@ -3382,9 +3378,9 @@ window.QUESTION_BANKS = {
         "stem": "树的度",
         "options": [],
         "answer": null,
-        "sub": "reveal",
+        "sub": "text",
         "ref": "树结构中，结点所拥有的子树的棵数称为结点的度。树中结点度的最大值称为树的度。",
-        "score": 0
+        "score": 6
       },
       {
         "id": "lx3-7",
@@ -3394,9 +3390,9 @@ window.QUESTION_BANKS = {
         "stem": "连通图",
         "options": [],
         "answer": null,
-        "sub": "reveal",
+        "sub": "text",
         "ref": "如果无向图 G 中任意一个顶点到其他任意顶点都至少存在一条路径，也就是说，图中任意两个顶点都是连通的，则称图 G 为连通图（connected graph）。",
-        "score": 0
+        "score": 6
       },
       {
         "id": "lx3-8",
@@ -3406,9 +3402,9 @@ window.QUESTION_BANKS = {
         "stem": "图的邻接表",
         "options": [],
         "answer": null,
-        "sub": "reveal",
+        "sub": "text",
         "ref": "图的一种链式存储结构。在邻接表中，对图中每个顶点建立一个单链表，n 个顶点就要建 n 个链表；无向图中，单链表中的结点表示依附于顶点 vᵢ 的边，对于有向图，是以顶点 vᵢ 为尾的弧。",
-        "score": 0
+        "score": 6
       },
       {
         "id": "lx3-9",
@@ -3418,9 +3414,9 @@ window.QUESTION_BANKS = {
         "stem": "冒泡排序",
         "options": [],
         "answer": null,
-        "sub": "reveal",
+        "sub": "text",
         "ref": "先将第一个和第二个键值比较交换，然后比较第二个和第三个键值交换，以此类推，直到第 n 个和第 n-1 个记录比较交换，这称为一趟起泡。每趟将键值最大的记录换到最后。重复以上过程，每次移动都向最终目标前进，直至没有记录需要交换为止。",
-        "score": 0
+        "score": 6
       },
       {
         "id": "lx3-10",
@@ -3430,9 +3426,9 @@ window.QUESTION_BANKS = {
         "stem": "内部排序",
         "options": [],
         "answer": null,
-        "sub": "reveal",
+        "sub": "text",
         "ref": "当待排序的数据量不大，全部数据都可以放入内存，排序操作也完全在内存中进行时，相应的排序称为内部排序或内排序。",
-        "score": 0
+        "score": 6
       }
     ],
     essays: []

@@ -1741,4 +1741,27 @@ window.WORD_DICT = {
   'str': '字符串 (string 的缩写)',
   'tree': '树',
 
+  /* ---- 操作系统题库 ---- */
+  'bios': '基本输入输出系统 (Basic Input/Output System)',
+  'compaction': '拼接；紧凑 (把分散的空闲区集中到一块)',
+  'cpu': '中央处理器 (Central Processing Unit)',
+  'dma': '直接存储器存取 (Direct Memory Access, 不经过 CPU 直接在内存和外设间传送数据)',
+  'fcb': '文件控制块 (File Control Block)',
+  'fifo': '先进先出 (First In First Out, 先来的先被淘汰)',
+  'lfu': '最不经常使用 (Least Frequently Used, 淘汰访问次数最少的页面)',
+  'linux': 'Linux 操作系统',
+  'lru': '最近最少使用 (Least Recently Used, 淘汰最久没被访问的页面)',
+  'opt': '最优置换算法 (Optimal, 淘汰以后最久不会用到的页面, 只存在于理论中)',
+  'scan': '扫描算法 (磁盘调度里的电梯算法, 磁头来回扫)',
+  'unix': 'UNIX 操作系统',
+  // 解答题/综合计算题里冒出来的记号: 不算单词, 但悬停时总得说一句, 免得当成生词去背
+  'ah': '十六进制地址里的两位 (2F6AH 的后两位), 不是单词',
+  'bf': '十六进制地址 BF6AH 的前两位, 不是单词',
+  'fat': '文件分配表 (File Allocation Table)',
+  'kb': 'KB (Kilobyte, 千字节, 1KB = 1024 字节)',
+  'ms': '毫秒 (millisecond, 1 秒 = 1000 毫秒)',
+  'pcb': '进程控制块 (Process Control Block, 存着进程的全部描述信息)',
+  'pn': 'Pn —— 第 n 个写进程 (题目给进程起的名字), 不是单词',
+  'pr': 'Pr —— 读进程 (题目给进程起的名字), 不是单词',
+
 };

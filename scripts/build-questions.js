@@ -43,6 +43,11 @@ const TYPE_RULES = [
   { id: 'term', name: '名词解释', keywords: ['名词解释'], score: 6, exam: false, text: true },
   { id: 'reading', name: '阅读理解', keywords: ['阅读', '完形'], score: 2, exam: false },
   { id: 'sentrans', name: '单句翻译', keywords: ['单句翻译'], score: 2, exam: false, options: 3 },
+  // 解答题 / 综合计算题: 答案是整段文字, 还夹着列表、表格和代码块, 没法自评 ——
+  // 练习里把参考答案直接摊开给看, 不判分也不进错题本 (见 app.js 的 isRevealQ)。
+  // 分值给 0: 首页和成绩单的"满分"就自动不把它们算进去
+  { id: 'answer', name: '解答题', keywords: ['简答', '解答'], score: 0, exam: false, reveal: true },
+  { id: 'compute', name: '综合计算题', keywords: ['综合计算', '计算题'], score: 0, exam: false, reveal: true },
 ];
 const DEFAULT_TYPE = 'single';
 
@@ -136,6 +141,23 @@ function parseSubject(filePath, subjectName, opts) {
         // 首页"随机抽取 N 题"的 N
         const rp = body.match(/随机抽[^0-9]*(\d+)\s*题/);
         if (rp) settings.randomPick = parseInt(rp[1], 10);
+
+        // 填空题自动判分: 练习里不让人自评, 提交后把写的和参考答案比对 (见 app.js 的
+        // isAutoBlank)。只有写了这一句的科目才机判, 没写的科目照旧自评
+        if (/填空\s*题?\s*自动判分/.test(body)) settings.blankAuto = true;
+
+        // "<题型>直接看答案": 这种题不让人作答, 练习里把参考答案直接摊开, 和解答题
+        // 一个样 (0 分、不进错题本、不进模拟考试)。题型词照 TYPE_RULES 认, 认不出来
+        // 的词忽略 —— 和上面"按题型给分"一个口径
+        const direct = body.match(/([^\d,，]+?)直接(?:看答案|给答案)/g) || [];
+        for (const item of direct) {
+          const m = item.match(/([^\d,，]+?)直接(?:看答案|给答案)/);
+          const word = m[1].trim();
+          const id = detectType(word);
+          if (id === DEFAULT_TYPE && word.indexOf(typeRule(DEFAULT_TYPE).keywords[0]) < 0) continue;
+          if (!settings.revealTypes) settings.revealTypes = [];
+          if (settings.revealTypes.indexOf(id) < 0) settings.revealTypes.push(id);
+        }
       }
       continue;
     }
@@ -148,8 +170,16 @@ function parseSubject(filePath, subjectName, opts) {
         currentPassage.text[currentPassage.text.length - 1] += ' ' + cleanText(line);
       } else if (lastSlot === 'source' && prev) {
         prev.source += (prev.source ? ' ' : '') + cleanText(line);
+      } else if (lastSlot === 'ref' && prev && prev.sub === 'reveal') {
+        // 解答题/综合计算题的参考答案是整段文字 (还夹着列表、表格、代码块):
+        // 一行一段, 换行原样留着交给前端的 refBlock 排版。这里不能走 cleanText,
+        // 否则代码块的缩进会被压平
+        prev.ref += (prev.ref ? '\n' : '') + raw.replace(/^ {2}/, '').replace(/\s+$/, '');
       } else if (lastSlot === 'ref' && prev) {
         prev.ref += (prev.ref ? ' ' : '') + cleanText(line);
+      } else if (lastSlot === 'stem' && prev && prev.sub === 'reveal') {
+        // 题干里也有列表和分小题, 同样一行一段
+        prev.stem += '\n' + line;
       } else if (lastSlot === 'stem' && prev) {
         prev.stem += ' ' + line;
       } else {
@@ -220,6 +250,11 @@ function parseSubject(filePath, subjectName, opts) {
         q.sub = 'text';
         q.ref = '';
       }
+      // 解答题/综合计算题: 参考答案是多段文字, 练习里直接摊开给看, 不用作答
+      if (rule && rule.reveal) {
+        q.sub = 'reveal';
+        q.ref = '';
+      }
       questions.push(q);
       lastSlot = 'stem';
       continue;
@@ -241,7 +276,9 @@ function parseSubject(filePath, subjectName, opts) {
     if (textRefMatch) {
       const q = questions[questions.length - 1];
       if (!q) throw new Error('参考答案行前面没有题目: ' + line);
-      if (q.sub !== 'text') throw new Error('参考答案行只用于填空/名词解释题: ' + line);
+      if (q.sub !== 'text' && q.sub !== 'reveal') {
+        throw new Error('参考答案行只用于填空/名词解释/解答题: ' + line);
+      }
       q.ref = q.ref ? q.ref + ' ' + textRefMatch[1] : textRefMatch[1];
       lastSlot = 'ref';
       continue;
@@ -311,6 +348,16 @@ function parseSubject(filePath, subjectName, opts) {
     }
   }
 
+  // "<题型>直接看答案" 的题: 改成看答案的题, 分值归零 (它不再进任何统计)。
+  // 放在贴分值之后, 因为分值是从题型设置里读的, 先贴再盖
+  if (settings.revealTypes) {
+    for (const q of questions) {
+      if (settings.revealTypes.indexOf(q.type) < 0) continue;
+      q.sub = 'reveal';
+      q.score = 0;
+    }
+  }
+
   // 校验
   const errors = [];
   if (!sections.length) errors.push('没有解析到任何分节标题');
@@ -325,6 +372,12 @@ function parseSubject(filePath, subjectName, opts) {
       // 没有选项也没有答案, 参考答案是唯一的对照标准, 缺了这题就等于没答案
       if (!q.ref || !q.ref.trim()) errors.push(`${q.id} 填空/名词解释题缺少 "参考答案：" 行`);
       if (q.answer !== null) errors.push(`${q.id} 文字题不该有 "答案：" 行 (要写 "参考答案：")`);
+      continue;
+    }
+    if (q.sub === 'reveal') {
+      // 这种题除了参考答案什么都没有, 缺了这题就是一张空卡
+      if (!q.ref || !q.ref.trim()) errors.push(`${q.id} 解答题缺少 "参考答案：" 行`);
+      if (q.options.length) errors.push(`${q.id} 解答题不该有选项`);
       continue;
     }
     const want = expectedOptions(q.type);
@@ -359,6 +412,7 @@ function parseSubject(filePath, subjectName, opts) {
       const rule = TYPE_RULES.find((r) => r.id === s.type) || { id: s.type, name: s.type };
       const t = { id: rule.id, name: rule.name };
       if (rule.exam === false) t.exam = false;
+      if (rule.reveal || (settings.revealTypes || []).indexOf(rule.id) >= 0) t.reveal = true;
       types.push(t);
     }
   }

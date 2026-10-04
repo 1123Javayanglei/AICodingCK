@@ -28,11 +28,13 @@
   // 模拟考试勾了"加入填空题 / 加入名词解释"时要随机抽的题
   let BLANK_POOL = [], TERM_POOL = [];
   let TYPE_EXAM = {};                          // 题型 id -> 不进考试 (题库里标了 exam:false)
-  // 科目级设置 (题库 txt 顶部的 "# 设置:"), 缺省就是老科目那套: 每题 1 分、进模拟考试
-  let SETTINGS = { examEnabled: true, mcqScore: 1, translateScore: 5, typeScores: {}, randomPick: 0 };
+  // 科目级设置 (题库 txt 顶部的 "# 设置:"), 缺省就是老科目那套: 每题 1 分、进模拟考试。
+  // blankAuto: 填空题提交后和题库答案比对 (题库里写了"填空自动判分"才开)
+  let SETTINGS = { examEnabled: true, mcqScore: 1, translateScore: 5, typeScores: {}, randomPick: 0, blankAuto: false };
 
-  // 每题多少分。老题库没有 score 字段, 一律按 1 分
-  function qScore(q) { return (q && q.score) || 1; }
+  // 每题多少分。老题库没有 score 字段, 一律按 1 分; 0 分是真的 0 分
+  // (解答题/综合计算题不分对错, 分值给 0, 满分里就不算它们)
+  function qScore(q) { return (q && q.score != null) ? q.score : 1; }
   function sumScore(list) {
     return list.reduce(function (a, q) { return a + qScore(q); }, 0);
   }
@@ -208,7 +210,7 @@
     TYPES = b.types || [];
     ESSAYS = b.essays || [];
     PASSAGES = b.passages || [];
-    SETTINGS = Object.assign({ examEnabled: true, mcqScore: 1, translateScore: 5, typeScores: {}, randomPick: 0 },
+    SETTINGS = Object.assign({ examEnabled: true, mcqScore: 1, translateScore: 5, typeScores: {}, randomPick: 0, blankAuto: false },
       b.settings || {});
     TOTAL = QUESTIONS.length;
     TOTAL_SCORE = sumScore(QUESTIONS);
@@ -243,7 +245,9 @@
     });
     SENTRANS_POOL = QUESTIONS.filter(function (q) { return q.type === 'sentrans'; });
     BLANK_POOL = QUESTIONS.filter(function (q) { return q.type === 'blank'; });
-    TERM_POOL = QUESTIONS.filter(function (q) { return q.type === 'term'; });
+    // 名词解释要是被题库设成"直接看答案" (sub=reveal), 就不再是能自评计分的题:
+    // 池子里不收, 考试首页的"加入名词解释"勾选框也就自动不摆了
+    TERM_POOL = QUESTIONS.filter(function (q) { return q.type === 'term' && !isRevealQ(q); });
 
     wrongBook = wrongStore[id] || {};
     history = historyStore[id] || [];
@@ -340,15 +344,86 @@
     return el;
   }
 
-  // 把题干里的 ____ 渲染成填空样式
+  // 把题干里的 ____ 渲染成填空样式。解答题的题干里有列表和分小题 (靠 \n 分行),
+  // 那种拆成多个 <p>; 普通题干只有一行, 还是原来那一个 <p>
   function stemNode(text, className) {
-    const p = h('p', className || 'stem');
-    const parts = String(text).split(/(_{2,})/);
-    parts.forEach(function (part) {
-      if (/^_{2,}$/.test(part)) p.appendChild(h('span', 'blank', '______'));
-      else if (part) p.appendChild(document.createTextNode(part));
+    const cls = className || 'stem';
+    const paras = String(text).split('\n').map(function (line) {
+      const p = h('p', cls);
+      line.split(/(_{2,})/).forEach(function (part) {
+        if (/^_{2,}$/.test(part)) p.appendChild(h('span', 'blank', '______'));
+        else if (part) p.appendChild(document.createTextNode(part));
+      });
+      return p;
     });
-    return p;
+    if (paras.length === 1) return paras[0];
+    const box = h('div', 'stem-lines');
+    paras.forEach(function (p) { box.appendChild(p); });
+    return box;
+  }
+
+  /* 解答题 / 综合计算题的参考答案是整段文字, 一格一行:
+     普通行 = 一段, `- ` / `1. ` 开头 = 列表, `| ` 开头 = 表格, ``` 围起来 = 代码块。
+     只给这两类题用 —— 别的参考答案都是一行, 用不上 */
+  function refBlock(text) {
+    const box = h('div', 'rich');
+    const lines = String(text || '').split('\n');
+    let i = 0;
+    while (i < lines.length) {
+      const line = lines[i];
+      if (/^```/.test(line)) {                       // 代码块: ``` 到下一个 ```
+        const code = [];
+        i += 1;
+        while (i < lines.length && !/^```/.test(lines[i])) { code.push(lines[i]); i += 1; }
+        i += 1;
+        box.appendChild(h('pre', 'rich-code', code.join('\n')));
+      } else if (line.charAt(0) === '|') {           // 表格: 第二行是 | --- | 分隔行
+        const rows = [];
+        while (i < lines.length && lines[i].charAt(0) === '|') { rows.push(lines[i]); i += 1; }
+        box.appendChild(richTable(rows));
+      } else if (/^[-*]\s+/.test(line)) {
+        const ul = h('ul', 'rich-list');
+        while (i < lines.length && /^[-*]\s+/.test(lines[i])) {
+          ul.appendChild(h('li', null, lines[i].replace(/^[-*]\s+/, '')));
+          i += 1;
+        }
+        box.appendChild(ul);
+      } else if (/^\d+\.\s+/.test(line)) {
+        const ol = h('ol', 'rich-list');
+        while (i < lines.length && /^\d+\.\s+/.test(lines[i])) {
+          ol.appendChild(h('li', null, lines[i].replace(/^\d+\.\s+/, '')));
+          i += 1;
+        }
+        box.appendChild(ol);
+      } else if (line.trim()) {
+        box.appendChild(h('p', null, line));
+        i += 1;
+      } else {
+        i += 1;                                      // 空行只是分段, 不用建节点
+      }
+    }
+    return box;
+  }
+
+  function richTable(rows) {
+    const cells = function (line) {
+      return line.replace(/^\|/, '').replace(/\|$/, '').split('|').map(function (s) { return s.trim(); });
+    };
+    const table = h('table', 'rich-table');
+    const thead = h('thead');
+    const hr = h('tr');
+    cells(rows[0]).forEach(function (c) { hr.appendChild(h('th', null, c)); });
+    thead.appendChild(hr);
+    table.appendChild(thead);
+    const tbody = h('tbody');
+    // 跳过 `| --- | --- |` 那行分隔符
+    rows.slice(1).filter(function (r) { return !/^\|[\s|:-]+\|$/.test(r); }).forEach(function (r) {
+      const tr = h('tr');
+      cells(r).forEach(function (c) { tr.appendChild(h('td', null, c || '')); });
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    return table;
   }
 
   // 阅读理解的短文。正文里用 [ ] 框住的那一段是书上标的"翻译这一段", 渲染成高亮
@@ -548,6 +623,9 @@
   // 题型卡上那句分值说明: 每题分值一样就写"每题 N 分",
   // 阅读这种选择+翻译混着的分开列 (分值从题上读, 不猜设置)
   function typeScoreDesc(typeQs, typeScore) {
+    if (typeQs.length && isRevealQ(typeQs[0])) return '直接看参考答案 · 不计分';
+    // 自动判分的填空题说一声, 免得还等着"我答对了"那个按钮
+    const auto = typeQs.length && isAutoBlank(typeQs[0]) ? ' · 填完自动判分' : '';
     const mcq = typeQs.filter(function (q) { return !isTranslate(q); })[0];
     const tl = typeQs.filter(isTranslate)[0];
     if (mcq && tl) {
@@ -555,14 +633,16 @@
     }
     const per = typeQs.length ? qScore(typeQs[0]) : 0;
     return (per && typeScore === typeQs.length * per ? '每题 ' + per + ' 分 · ' : '') +
-      '满分 ' + typeScore + ' 分';
+      '满分 ' + typeScore + ' 分' + auto;
   }
 
-  // 首页那句分值说明: 全科一样就"每题 N 分", 不一样只报满分
-  // (各题型多少分, 练习设置的题型卡上写着)
+  // 首页那句分值说明: 全科一样就"每题 N 分", 不一样只报满分。
+  // 解答题这种看答案的题不计分, 单说一句, 免得"66 题 / 满分 50"看着对不上
   function scoreDesc() {
-    if (TOTAL_SCORE === TOTAL) return '每题 1 分 · 满分 ' + TOTAL_SCORE + ' 分';
-    return '满分 ' + TOTAL_SCORE + ' 分';
+    const view = QUESTIONS.filter(isRevealQ).length;
+    const tail = view ? ' · 另有 ' + view + ' 题看答案' : '';
+    if (TOTAL_SCORE === TOTAL) return '每题 1 分 · 满分 ' + TOTAL_SCORE + ' 分' + tail;
+    return '满分 ' + TOTAL_SCORE + ' 分' + tail;
   }
 
   function optionText(q, idx) {
@@ -1001,7 +1081,8 @@
     }
     if (key === 'blank') {
       return withBlankNow()
-        ? '随机抽 ' + BLANK_PICK + ' 道填空题 (每题 ' + qScore(BLANK_POOL[0]) + ' 分), 一题一页, 自己判对错'
+        ? '随机抽 ' + BLANK_PICK + ' 道填空题 (每题 ' + qScore(BLANK_POOL[0]) + ' 分), 一题一页, ' +
+          (BLANK_POOL.length && isAutoBlank(BLANK_POOL[0]) ? '交卷时统一比对答案' : '自己判对错')
         : '不勾选则考试里没有填空题';
     }
     if (key === 'term') {
@@ -1068,7 +1149,8 @@
       '共 ' + TOTAL + ' 题 · ' + scoreDesc()));
     wrap.appendChild(hero);
 
-    const lastRec = history.length ? history[0] : null;
+    // "最近得分"要的是有分可报的那条: 纯看答案的练习没有分, 跳过
+    const lastRec = history.filter(function (x) { return recFull(x) > 0; })[0] || null;
     // 平铺的 "35 分" 就够读了; 只有带作文的记录分母不固定(20 或 60), 才需要写成 35 / 60
     const lastScore = lastRec
       ? (lastRec.essayFull ? recScore(lastRec) + ' / ' + recFull(lastRec) : recScore(lastRec) + ' 分')
@@ -1146,7 +1228,9 @@
         item.appendChild(h('span', null, fmtDate(rec.at) + ' · ' +
           (rec.mode === 'exam' ? examLabel(rec) : (rec.essayFull ? '写作练习' : '练习')) +
           ' · 用时 ' + fmtTime(rec.seconds)));
-        item.appendChild(h('span', 'score ' + scoreCls, recScore(rec) + ' / ' + recFull(rec)));
+        // 纯看答案的练习没有分, 写"看答案 N 题"比"0 / 0"像话
+        item.appendChild(h('span', 'score ' + (recFull(rec) ? scoreCls : ''),
+          recFull(rec) ? recScore(rec) + ' / ' + recFull(rec) : '看答案 ' + rec.total + ' 题'));
         list.appendChild(item);
       });
       wrap.appendChild(list);
@@ -1204,8 +1288,8 @@
           row.setAttribute('data-scope', s.id);
           row.appendChild(h('span', 't', s.name));
           // 每题 1 分的科目就别写"6 题 · 6 分"了, 数字重复看着累
-          row.appendChild(h('span', 'd', list.length + ' 题' +
-            (score === list.length ? '' : ' · ' + score + ' 分')));
+          row.appendChild(h('span', 'd', (list.length && isRevealQ(list[0])) ? list.length + ' 题 · 看答案'
+            : list.length + ' 题' + (score === list.length ? '' : ' · ' + score + ' 分')));
           sub.appendChild(row);
         });
         card.appendChild(sub);
@@ -1384,6 +1468,8 @@
 
   // 一道题答了没有: 自评文字题不进 answers(没有选项可存), 以自评为准
   function qDone(s, q) {
+    // 考试里的自动判分填空题交卷时才判, 没有"已判"这个状态 —— 写上就算答了
+    if (s.mode === 'exam' && isAutoBlank(q)) return !!(s.transTexts[q.id] || '').trim();
     return isTextQ(q) ? !!s.revealed[q.id] : s.answers[q.id] != null;
   }
 
@@ -1604,19 +1690,22 @@
     container.appendChild(actions);
   }
 
-  /* 自评文字题: (原文) + 输入框 + 自评按钮。
-     没有标准答案可判, 所以让做题的人自己判; 判完才给参考答案对照 ——
+  /* 文字题: (原文) + 输入框 + 判分按钮。
+     自评的 (翻译/名词解释) 没有标准答案可判, 所以让做题的人自己判; 自动判分的填空
+     只有一个"提交答案", 提交后和题库里的参考答案比对。两种都是判完才给答案对照 ——
      顺序反了就等于先把答案摆在眼前。
      翻译题下面挂着要译的原文, 填空/名词解释题没有原文, 直接写答案。 */
   function translateBody(card, q, s, revealed) {
     const isTl = q.sub === 'translate';
+    const auto = isAutoBlank(q);
     if (q.source) card.appendChild(h('div', 'tl-source', q.source));
 
     const text = s.transTexts[q.id] || '';
-    const ta = document.createElement('textarea');
+    // 自动判分的填空题只填一两个词, 用单行输入框; 翻译/名词解释要写整段, 用多行文本域
+    const ta = document.createElement(auto ? 'input' : 'textarea');
     ta.id = 'tl-input';
-    ta.className = 'tl-input';
-    ta.rows = 5;
+    ta.className = 'tl-input' + (auto ? ' tl-input-line' : '');
+    if (!auto) ta.rows = 5;
     ta.placeholder = isTl ? '写出你的译文...' : '写出你的答案...';
     ta.value = text;
     ta.disabled = revealed;
@@ -1625,34 +1714,57 @@
     if (!revealed) {
       const has = !!text.trim();
       const bar = h('div', 'tl-actions');
-      const okBtn = h('button', 'primary',
-        (isTl ? '我翻对了' : '我答对了') + ' (+' + qScore(q) + ' 分)');
-      okBtn.id = 'tl-ok';
-      okBtn.setAttribute('data-action', 'self-ok');
-      okBtn.disabled = !has;
-      const noBtn = h('button', null, isTl ? '我翻错了' : '我答错了');
-      noBtn.id = 'tl-bad';
-      noBtn.setAttribute('data-action', 'self-bad');
-      noBtn.disabled = !has;
-      bar.appendChild(okBtn);
-      bar.appendChild(noBtn);
-      bar.appendChild(h('span', 'hint', isTl ? '译完自己判, 判完给参考译文对照'
-        : '写完自己判, 判完给参考答案对照'));
+      if (auto && s.mode === 'exam') {
+        // 考试里不当场判: 交卷时统一和题库答案比对, 这之前还改得动
+        bar.appendChild(h('span', 'hint', '交卷时统一和题库答案比对'));
+      } else if (auto) {
+        const submit = h('button', 'primary', '提交答案');
+        submit.id = 'tl-ok';   // 输入框的 input 监听按这个 id 找按钮
+        submit.setAttribute('data-action', 'submit-blank');
+        submit.disabled = !has;
+        bar.appendChild(submit);
+        bar.appendChild(h('span', 'hint', '填完提交, 和题库答案比对'));
+      } else {
+        const okBtn = h('button', 'primary',
+          (isTl ? '我翻对了' : '我答对了') + ' (+' + qScore(q) + ' 分)');
+        okBtn.id = 'tl-ok';
+        okBtn.setAttribute('data-action', 'self-ok');
+        okBtn.disabled = !has;
+        const noBtn = h('button', null, isTl ? '我翻错了' : '我答错了');
+        noBtn.id = 'tl-bad';
+        noBtn.setAttribute('data-action', 'self-bad');
+        noBtn.disabled = !has;
+        bar.appendChild(okBtn);
+        bar.appendChild(noBtn);
+        bar.appendChild(h('span', 'hint', isTl ? '译完自己判, 判完给参考译文对照'
+          : '写完自己判, 判完给参考答案对照'));
+      }
       card.appendChild(bar);
       return;
     }
 
-    card.appendChild(h('div', 'feedback ' + (s.selfOk[q.id] ? 'ok' : 'no'),
-      s.selfOk[q.id] ? '✓ 自评正确' : '✗ 自评错误, 已记入错题本'));
+    const ok = !!s.selfOk[q.id];
+    card.appendChild(h('div', 'feedback ' + (ok ? 'ok' : 'no'),
+      auto ? (ok ? '✓ 回答正确' : '✗ 回答错误' + (s.mode === 'exam' ? '' : ', 已记入错题本'))
+           : (ok ? '✓ 自评正确' : '✗ 自评错误, 已记入错题本')));
 
-    // 参考答案只在自己判完之后给 (考试里也一样): 这类题没有选择题那种"标准答案",
-    // 不给参考就没法自评, 而上面这个 return 已经挡住了"没判就看答案"
+    // 答案对照只在自己判完之后给 (考试里也一样): 上面这个 return 已经挡住了"没判就看答案"
     if (q.ref) {
       const ref = h('div', 'tl-ref');
-      ref.appendChild(h('div', 'tl-ref-head', isTl ? '参考译文' : '参考答案'));
+      ref.appendChild(h('div', 'tl-ref-head', refLabel(q)));
       ref.appendChild(h('p', null, q.ref));
       card.appendChild(ref);
     }
+  }
+
+  /* 解答题 / 综合计算题: 不用作答, 参考答案直接摊开 —— 没有输入框也没有"我答对了",
+     看完点"下一题"就行。所以它不占会话状态, 也不进对错统计 */
+  function revealBody(card, q) {
+    if (!q.ref) return;
+    const ref = h('div', 'tl-ref');
+    ref.appendChild(h('div', 'tl-ref-head', '参考答案'));
+    ref.appendChild(refBlock(q.ref));
+    card.appendChild(ref);
   }
 
   // 一张题卡: 标注 + 题干 + 选项(或自评文字题) + 判分反馈 + 解析。
@@ -1660,13 +1772,16 @@
   function questionCard(q, s) {
     const card = h('div', 'qcard');
     card.setAttribute('data-qid', q.id);
-    card.appendChild(h('div', 'qmeta', qmetaText(q) + ' · ' + qScore(q) + ' 分'));
+    // 看答案的题 0 分, 别在题头上写"· 0 分"
+    card.appendChild(h('div', 'qmeta', qmetaText(q) + (qScore(q) ? ' · ' + qScore(q) + ' 分' : '')));
 
     card.appendChild(stemNode(q.stem));
 
     const revealed = !!s.revealed[q.id];
 
-    if (isTextQ(q)) {
+    if (isRevealQ(q)) {
+      revealBody(card, q);
+    } else if (isTextQ(q)) {
       translateBody(card, q, s, revealed);
     } else {
       const opts = h('div', 'options');
@@ -1862,8 +1977,37 @@
   // 阅读相关的几处仍只认 isTranslate: 那边的题有选项, 是选择题那一套。
   function isTextQ(q) { return q.sub === 'translate' || q.sub === 'text'; }
 
+  // 解答题/综合计算题: 答案是好几段文字 (还夹着表格和代码块), 没标准答案可判,
+  // 也没法自评 —— 练习里直接把参考答案摊开给看, 不分对错、不计分、不进错题本
+  function isRevealQ(q) { return q.sub === 'reveal'; }
+
+  // 填空题自动判分: 题库里写了 "# 设置: 填空自动判分" 才开 —— 不让人自评, 提交后
+  // 把写的和题库里的参考答案比对, 一样算对。名词解释题不走这条路, 仍然自评
+  function isAutoBlank(q) { return SETTINGS.blankAuto === true && q.sub === 'text' && q.type === 'blank'; }
+
+  // 比对前先归一化, 只收拾"明显是同一个答案"的差异: 全角转半角 (（）→(), Ａ→A)、
+  // 大小写 (CPU/cpu)、空格 (含全角空格, 一律不算)、末尾的句读。剩下的不同就是真的不同
+  function normAnswer(s) {
+    return String(s == null ? '' : s)
+      .replace(/[！-～]/g, function (c) { return String.fromCharCode(c.charCodeAt(0) - 0xFEE0); })
+      .toLowerCase()
+      .replace(/\s+/g, '')
+      .replace(/[.。;；,，、!！?？]+$/, '');
+  }
+  function matchAnswer(q, text) { return normAnswer(text) === normAnswer(q.ref); }
+
+  // 自动判分的填空题, 题库里那份就是判分的标准, 不再叫"参考答案"
+  function refLabel(q) {
+    if (isAutoBlank(q)) return '正确答案';
+    return q.sub === 'translate' ? '参考译文' : '参考答案';
+  }
+
   function buildResult(session) {
     const entries = session.questions.map(function (q) {
+      // 看答案的题: 不分对错, 也不记"答了没". view 让后面几处统计把它整个跳过
+      if (isRevealQ(q)) {
+        return { q: q, chosen: null, ok: false, graded: false, view: true, text: '' };
+      }
       if (isTextQ(q)) {
         return {
           q: q,
@@ -1882,8 +2026,10 @@
     };
     // 记在条目上: 题型明细也要按"错"和"未答"分开数
     entries.forEach(function (e) { e.skipped = !e.ok && !answered(e); });
-    const correct = entries.filter(function (e) { return e.ok; }).length;
-    const skipped = entries.filter(function (e) { return e.skipped; }).length;
+    // 看答案的题不算对不算错也不算未答, 单独数
+    const scored = entries.filter(function (e) { return !e.view; });
+    const correct = scored.filter(function (e) { return e.ok; }).length;
+    const skipped = scored.filter(function (e) { return e.skipped; }).length;
     return {
       mode: session.mode,
       shuffled: !!session.shuffled,
@@ -1896,9 +2042,12 @@
       withTerm: !!session.withTerm,
       entries: entries,
       total: entries.length,
+      // 计分的题数 (不含看答案的题), 成绩单算得分率时按它
+      scored: scored.length,
+      view: entries.length - scored.length,
       correct: correct,
       skipped: skipped,
-      wrong: entries.length - correct - skipped,
+      wrong: scored.length - correct - skipped,
       // 分值不统一的科目按题上标的分数算分, 全 1 分时 points === correct
       points: entries.reduce(function (a, e) { return a + (e.ok ? qScore(e.q) : 0); }, 0),
       full: sumScore(session.questions),
@@ -1920,6 +2069,7 @@
   function applyGrading(result) {
     // 错题本规则: 答错或未作答 → 加入/累加; 答对且已在错题本中 → 移出
     result.entries.forEach(function (e) {
+      if (e.view) return;                      // 看答案的题不分对错, 不进错题本
       if (e.ok) markRight(e.q.id);
       // chosen 是本次会话的下标, 要换算回原始下标再存, chosen 为 null 表示未作答
       else markWrong(e.q.id, toOriginalIndex(e.q, e.chosen));
@@ -1938,14 +2088,23 @@
     const rate = full ? got / full : 0;
     const cls = rate >= 0.8 ? 'good' : (rate >= 0.6 ? 'mid' : 'bad');
 
+    const label = r.mode === 'exam' ? examLabel(r) : (r.mode === 'redo' ? '错题重做' : '练习');
     const card = h('div', 'score-card');
-    card.appendChild(h('div', 'score-num ' + cls, got + ' 分'));
-    card.appendChild(h('div', 'score-sub',
-      (r.mode === 'exam' ? examLabel(r) : (r.mode === 'redo' ? '错题重做' : '练习')) +
-      ' · 满分 ' + full + ' 分 · 得分率 ' + Math.round(rate * 100) + '% · 用时 ' + fmtTime(r.seconds)));
+    if (full) {
+      card.appendChild(h('div', 'score-num ' + cls, got + ' 分'));
+      card.appendChild(h('div', 'score-sub',
+        label + ' · 满分 ' + full + ' 分 · 得分率 ' + Math.round(rate * 100) +
+        '% · 用时 ' + fmtTime(r.seconds)));
+    } else {
+      // 一套全是"看答案"的题 (解答题/综合计算题): 没有分可算, 报数就行
+      card.appendChild(h('div', 'score-num', r.total + ' 题'));
+      card.appendChild(h('div', 'score-sub',
+        label + ' · 看参考答案 · 用时 ' + fmtTime(r.seconds)));
+    }
 
     const detail = h('div', 'score-detail');
     const detailRows = [['正确', r.correct, 'good'], ['错误', r.wrong, 'bad'], ['未答', r.skipped, '']];
+    if (r.view) detailRows.push(['看答案', r.view, '']);
     if (r.essay) detailRows.push(['作文', essayGot + '/' + essayFull, '']);
     detailRows.forEach(function (row) {
       const box = h('div');
@@ -2000,7 +2159,8 @@
       again.disabled = !remain;
       actions.appendChild(again);
     } else {
-      const wrongOnes = r.entries.filter(function (e) { return !e.ok; });
+      // 看答案的题不算错题, 别让"只做错题"把它们带上
+      const wrongOnes = r.entries.filter(function (e) { return !e.ok && !e.view; });
       const again = h('button', 'primary', '只做错题 (' + wrongOnes.length + ')');
       again.setAttribute('data-action', 'practice-wrong-now');
       again.disabled = !wrongOnes.length;
@@ -2035,7 +2195,22 @@
 
     const list = h('div');
     r.entries.forEach(function (e) {
-      if (state.filterWrongOnly && e.ok) return;
+      if (state.filterWrongOnly && (e.ok || e.view)) return;
+      // 看答案的题: 不分对错, 回顾里照样把参考答案摆出来
+      if (e.view) {
+        const item = h('div', 'review-item view');
+        const vmeta = h('div');
+        vmeta.appendChild(h('span', 'tag view', '看答案'));
+        vmeta.appendChild(h('span', 'qmeta', qmetaText(e.q)));
+        item.appendChild(vmeta);
+        item.appendChild(stemNode(e.q.stem, 'stem'));
+        const vref = h('div', 'tl-ref');
+        vref.appendChild(h('div', 'tl-ref-head', '参考答案'));
+        vref.appendChild(refBlock(e.q.ref));
+        item.appendChild(vref);
+        list.appendChild(item);
+        return;
+      }
       // 自评文字题没有选项, "未答"要看有没有自评过
       const answered = isTextQ(e.q) ? e.graded : e.chosen !== null;
       const item = h('div', 'review-item ' + (e.ok ? '' : (answered ? 'wrong' : 'skipped')));
@@ -2055,7 +2230,7 @@
         myTl.appendChild(h('b', (e.ok ? 'good' : 'bad') + ' tl-text', e.text || '未作答'));
         item.appendChild(myTl);
         const refTl = h('div', 'review-line');
-        refTl.appendChild(document.createTextNode(isTl ? '参考译文: ' : '参考答案: '));
+        refTl.appendChild(document.createTextNode(refLabel(e.q) + ': '));
         refTl.appendChild(h('b', 'good tl-text', e.q.ref || ''));
         item.appendChild(refTl);
         list.appendChild(item);
@@ -2131,13 +2306,12 @@
       item.appendChild(meta);
       item.appendChild(stemNode(q.stem, 'stem'));
 
-      // 自评文字题没有选项也没有"上次选了哪个": 翻译题给原文和参考译文,
-      // 填空/名词解释给参考答案就够了
+      // 文字题没有选项也没有"上次选了哪个": 翻译题给原文和参考译文,
+      // 填空/名词解释给答案 (自动判分的填空就是"正确答案") 就够了
       if (isTextQ(q)) {
-        const isTl = q.sub === 'translate';
         if (q.source) item.appendChild(h('div', 'tl-source', q.source));
         const ref = h('div', 'review-line');
-        ref.appendChild(document.createTextNode(isTl ? '参考译文: ' : '参考答案: '));
+        ref.appendChild(document.createTextNode(refLabel(q) + ': '));
         ref.appendChild(h('b', 'good tl-text', q.ref || ''));
         item.appendChild(ref);
       } else {
@@ -2215,10 +2389,10 @@
   // essay 传 null 就是没有作文; 传作文对象则作为最后一步
   function startSession(mode, questions, essay) {
     // 选项乱序只在模拟考试生效; 练习/重做保持原顺序, 便于对照错题本。
-    // 自评文字题没有选项, 洗不得 —— 空 options 会让 shuffleQuestion 把 answer 洗成 -1
+    // 自评文字题和看答案的题没有选项, 洗不得 —— 空 options 会让 shuffleQuestion 把 answer 洗成 -1
     const shuffled = mode === 'exam' && state.shuffleOptions;
     const list = shuffled
-      ? questions.map(function (q) { return isTextQ(q) ? q : shuffleQuestion(q); })
+      ? questions.map(function (q) { return (isTextQ(q) || isRevealQ(q)) ? q : shuffleQuestion(q); })
       : questions;
     // 考卷里有没有阅读理解: 有就一篇一页混排 (单选仍是逐题一页)
     const withReading = mode === 'exam' && state.withReading && canReading();
@@ -2290,7 +2464,7 @@
     const page = isPassageMode(s) ? s.pages[pageIdx] : null;
     if (!page) return;
     page.qs.forEach(function (q) {
-      if (s.revealed[q.id]) return;
+      if (s.revealed[q.id] || isRevealQ(q)) return;   // 看答案的题没有"没做完"这回事
       s.revealed[q.id] = true;
       if (isTextQ(q)) s.selfOk[q.id] = false;
       markWrong(q.id, null);
@@ -2338,6 +2512,36 @@
     if (!s || !q || !isTextQ(q) || s.revealed[q.id]) return;
     const text = (s.transTexts[q.id] || '').trim();
     if (!text) return;   // 按钮在没写字时是禁用的, 这里再兜一次
+    s.revealed[q.id] = true;
+    s.selfOk[q.id] = ok;
+    // 考试统一在交卷时 applyGrading 里记账, 这里再记一遍就重复了
+    if (s.mode !== 'exam') {
+      if (ok) markRight(q.id);
+      else markWrong(q.id, null);
+    }
+    render();
+  }
+
+  /* 考试里的自动判分填空题: 考试中不给按钮 (改还来得及), 交卷时统一和题库答案比对 ——
+     一样得分, 不一样不得分。没写的不标记, 留着算"未答" */
+  function gradeExamBlanks(s) {
+    s.questions.forEach(function (q) {
+      if (!isAutoBlank(q) || s.revealed[q.id]) return;
+      const text = (s.transTexts[q.id] || '').trim();
+      if (!text) return;
+      s.revealed[q.id] = true;
+      s.selfOk[q.id] = matchAnswer(q, text);
+    });
+  }
+
+  /* 填空题自动判分: 点"提交答案"就当交了这一题, 和题库里的参考答案比对, 展开正确答案。
+     判错的 lastAnswer 只能传 null —— 没有选项下标可存 */
+  function submitBlank(q) {
+    const s = state.session;
+    if (!s || !q || !isAutoBlank(q) || s.revealed[q.id]) return;
+    const text = (s.transTexts[q.id] || '').trim();
+    if (!text) return;   // 按钮在没写字时是禁用的, 这里再兜一次
+    const ok = matchAnswer(q, text);
     s.revealed[q.id] = true;
     s.selfOk[q.id] = ok;
     // 考试统一在交卷时 applyGrading 里记账, 这里再记一遍就重复了
@@ -2494,6 +2698,10 @@
         selfGrade(questionFrom(el), action === 'self-ok');
         break;
 
+      case 'submit-blank':
+        submitBlank(questionFrom(el));
+        break;
+
       case 'prev':
         if (isPassageMode(state.session)) {
           if (state.session.page > 0) { state.session.page -= 1; render(); }
@@ -2529,14 +2737,15 @@
 
       case 'submit-exam': {
         const s = state.session;
-        const left = s.questions.filter(function (q) {
-          return isTextQ(q) ? !s.revealed[q.id] : s.answers[q.id] == null;
-        }).length;
+        const left = s.questions.filter(function (q) { return !qDone(s, q); }).length;
         const msgs = [];
         if (left) msgs.push('还有 ' + left + ' 题未作答');
         if (s.essay && !essayWritten(s.essay)) msgs.push('作文还没写');
         const msg = msgs.length ? (msgs.join(', ') + ', 确定提交?') : '确定提交试卷?';
-        if (window.confirm(msg)) finishSession();
+        if (window.confirm(msg)) {
+          gradeExamBlanks(s);   // 交卷时统一判填空题 (没写的留着算未答)
+          finishSession();
+        }
         break;
       }
 
@@ -2641,7 +2850,7 @@
     }
   });
 
-  // 自评文字题的输入: 同上, 只存内存 + 切换自评按钮的可用状态
+  // 文字题的输入: 同上, 只存内存 + 切换判分按钮的可用状态
   document.addEventListener('input', function (e) {
     const s = state.session;
     if (!s || !s.transTexts || e.target.id !== 'tl-input') return;
@@ -2653,8 +2862,13 @@
     const card = e.target.closest ? e.target.closest('.qcard') : null;
     const okBtn = card && card.querySelector('[data-action="self-ok"]');
     const badBtn = card && card.querySelector('[data-action="self-bad"]');
+    const subBtn = card && card.querySelector('[data-action="submit-blank"]');
     if (okBtn) okBtn.disabled = !has;
     if (badBtn) badBtn.disabled = !has;
+    if (subBtn) subBtn.disabled = !has;
+    // 考试里的填空写上就算"已答", 计数器跟着走 (没渲染这一步, 只能手改文字)
+    const done = document.getElementById('answered-count');
+    if (done) done.textContent = '已答 ' + answeredCount(s);
   });
 
   // 作文输入: 只更新字数和内存里的文本, 不重渲染(否则输入框会失焦)
@@ -2672,6 +2886,13 @@
   // 键盘: A-D / 1-4 选答案, ←→ 切换, Enter 下一题
   document.addEventListener('keydown', function (e) {
     if (!state.session) return;
+    // 自动判分的填空题: 单行输入框里按回车 = 点"提交答案" (多行文本域里回车是换行, 不抢)
+    if (e.key === 'Enter' && e.target.tagName === 'INPUT' && e.target.id === 'tl-input') {
+      const box = e.target.closest ? e.target.closest('.qcard') : null;
+      const btn = box && box.querySelector('[data-action="submit-blank"]');
+      if (btn && !btn.disabled) { e.preventDefault(); btn.click(); }
+      return;
+    }
     // 正在输入框/文本域里打字时不要抢快捷键, 否则作文里敲个 a 就选中了选项 A
     const tag = e.target.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || e.target.isContentEditable) return;

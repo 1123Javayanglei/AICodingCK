@@ -1,5 +1,0 @@
-# 这个项目的文本文件本来就是 LF, 而本机 git 的 core.autocrlf=true。
-# 不锁死的话, 换台机器 checkout 会把 tests/run.sh 变成 CRLF, bash 立刻报
-#   $'\r': command not found
-# 而且它是在 cmd 里双击 run.bat 调起来的, 报错一闪就没, 很难看出是行尾问题。
-* text=auto eol=lf

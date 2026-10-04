@@ -18,6 +18,9 @@
 //                      |readinghome|readingsetup|translate|wrongtl
 //                      |examread|examreadtl (模拟考试勾上阅读理解)
 //                      |examresult (模拟考试结果页, 三个题型混着答几道)
+//                      |osanswer|oscompute|osresult (操作系统的解答题 / 综合计算题)
+//                      |osblank|osblankdone (操作系统的填空题自动判分: 提交前 / 提交后)
+//                      |osexam|osexamblank|osexamresult (操作系统的模拟考试: 首页勾选框 / 卷子里的填空 / 成绩单)
 const step = (location.search.match(/step=(\w+)/) || [])[1] || 'home';
 const GOOD = [
   'Nowadays, with the development of the Internet and mobile devices, the media has become an important part of our daily life, and shopping through various media has become increasingly common. Many people, especially young consumers, prefer to buy goods on shopping websites or through advertisements they see on television.',
@@ -34,6 +37,68 @@ const write = function (t) {
 };
 setTimeout(function () {
   if (step === 'home') return;
+  // 操作系统的模拟考试: 首页三个勾选框 / 卷子里的填空 (只写不判) / 交卷后的成绩单
+  if (step === 'osexam' || step === 'osexamblank' || step === 'osexamresult') {
+    q('[data-subject="操作系统"]').click();
+    ['toggle-random', 'toggle-blank'].forEach(function (a) {
+      const cb = q('[data-action="' + a + '"]');
+      cb.checked = true;
+      cb.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    if (step === 'osexam') return;
+    q('[data-action="start-exam"]').click();
+    const bank = window.QUESTION_BANKS['操作系统'];
+    const findQ = function (id) {
+      return bank.questions.filter(function (x) { return x.id === id; })[0];
+    };
+    for (let i = 0; i < 15; i++) {
+      q('.nav-grid .nav-btn[data-index="' + i + '"]').click();
+      const card = q('.qcard');
+      const item = findQ(card.getAttribute('data-qid'));
+      const btn = [].filter.call(card.querySelectorAll('.option'), function (b) {
+        return b.querySelector('.text').textContent === item.options[item.answer];
+      })[0];
+      if (btn) btn.click();
+    }
+    if (step === 'osexamblank') {
+      q('.nav-grid .nav-btn[data-index="15"]').click();
+      return;
+    }
+    for (let i = 15; i < 25; i++) {
+      q('.nav-grid .nav-btn[data-index="' + i + '"]').click();
+      const card = q('.qcard');
+      const item = findQ(card.getAttribute('data-qid'));
+      const input = card.querySelector('#tl-input');
+      input.value = (i === 24) ? '' : item.ref;   // 最后一题留空, 成绩单上能看到"未答"
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    q('[data-action="submit-exam"]').click();
+    return;
+  }
+  // 操作系统的填空题: 自动判分的单行输入框 (提交前 / 提交后)
+  if (step === 'osblank' || step === 'osblankdone') {
+    q('[data-subject="操作系统"]').click();
+    q('[data-action="goto-practice"]').click();
+    q('[data-scope="type:blank"]').click();
+    if (step === 'osblank') return;
+    const box = q('#tl-input');
+    box.value = '系统 资源。';   // 故意带空格和句号, 看归一化后判对
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+    q('#tl-ok').click();
+    return;
+  }
+  // 操作系统的解答题 / 综合计算题: 参考答案直接摊开 (列表 / 表格 / 代码块)
+  if (step === 'osanswer' || step === 'oscompute' || step === 'osresult') {
+    q('[data-subject="操作系统"]').click();
+    q('[data-action="goto-practice"]').click();
+    if (step === 'osanswer') { q('[data-scope="type:answer"]').click(); return; }
+    if (step === 'oscompute') { q('[data-scope="type:compute"]').click(); return; }
+    q('[data-scope="type:compute"]').click();
+    // 翻到最后一题再交卷, 回顾里四种题 (含表格) 都能看到
+    for (let i = 0; i < 3; i++) q('[data-action="next"]').click();
+    q('[data-action="finish-practice"]').click();
+    return;
+  }
   // 阅读理解并进了英语, 不再切科目: 练习 → 进"练习一" → 翻到第一道翻译题
   if (step === 'readinghome' || step === 'readingsetup' || step === 'translate' || step === 'wrongtl') {
     if (step === 'readinghome') return;          // 就是英语首页 (题型分组都在上面)

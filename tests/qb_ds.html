@@ -57,26 +57,34 @@
     '题型表就这三种', BANK.types.map(function (t) { return t.name; }).join('/'));
   ok(BANK.settings.examEnabled === true, '设置行不再写"不加入模拟考试", 模拟考试开着');
   ok(BANK.settings.typeScores.single === 2 && BANK.settings.typeScores.blank === 2 &&
-    BANK.settings.typeScores.term === 6, '设置行按题型给分 2/2/6',
+    BANK.settings.typeScores.term == null, '设置行按题型给分: 单选/填空各 2 分 (名词解释不计分)',
     JSON.stringify(BANK.settings.typeScores));
   ok(BANK.settings.randomPick === 10, '设置行写了"随机抽 10 题"', BANK.settings.randomPick);
+  ok(BANK.settings.blankAuto === true, '设置行写了"填空自动判分"');
+  ok(JSON.stringify(BANK.settings.revealTypes) === '["term"]',
+    '设置行写了"名词解释直接看答案"', JSON.stringify(BANK.settings.revealTypes));
   ok(JSON.stringify(window.QUESTION_BANKS['english'].settings.typeScores) === '{}' &&
-    !window.QUESTION_BANKS['english'].settings.randomPick,
+    !window.QUESTION_BANKS['english'].settings.randomPick &&
+    !window.QUESTION_BANKS['english'].settings.blankAuto &&
+    !window.QUESTION_BANKS['english'].settings.revealTypes,
     '英语的设置没被数据结构带跑',
     JSON.stringify(window.QUESTION_BANKS['english'].settings));
 
-  const texts = byType('blank').concat(byType('term'));
-  ok(texts.every(function (x) { return x.sub === 'text'; }), '填空/名词解释都是自评文字题');
-  ok(texts.every(function (x) { return x.ref && x.ref.trim(); }), '文字题都有参考答案');
-  ok(texts.every(function (x) { return x.options.length === 0 && x.answer === null; }),
-    '文字题没有选项, 也没有 A-D 答案');
+  const texts = byType('blank');
+  ok(texts.every(function (x) { return x.sub === 'text'; }), '填空走文字题那条路');
+  ok(texts.every(function (x) { return x.ref && x.ref.trim(); }), '填空题都有参考答案');
+  ok(byType('term').every(function (x) { return x.sub === 'reveal' && x.score === 0; }),
+    '名词解释改成看答案的题 (sub=reveal, 0 分)');
+  ok(texts.concat(byType('term')).every(function (x) {
+    return x.options.length === 0 && x.answer === null;
+  }), '填空/名词解释都没有选项, 也没有 A-D 答案');
   ok(byType('single').every(function (x) { return x.options.length === 4 && x.answer != null; }),
     '单选题还是四个选项 + 答案');
   ok(byType('single').every(function (x) { return x.score === 2; }) &&
     byType('blank').every(function (x) { return x.score === 2; }) &&
-    byType('term').every(function (x) { return x.score === 6; }),
-    '分值: 单选 2 / 填空 2 / 名词解释 6',
-    ALL.filter(function (x) { return x.score === 6; }).length + ' 道 6 分题');
+    byType('term').every(function (x) { return x.score === 0; }),
+    '分值: 单选 2 / 填空 2 / 名词解释 0',
+    ALL.filter(function (x) { return x.score === 2; }).length + ' 道 2 分题');
 
   ok(byId('lx2-11').ref === 'n-i+1', '公式答案照抄 (n-i+1)', byId('lx2-11').ref);
   ok(byId('lx2-15').ref === '最大高度是 6、最小高度是 3', '两个空的答案都写全了', byId('lx2-15').ref);
@@ -86,12 +94,13 @@
   ok(byId('lx1-1').stem.indexOf('________') > 0, '选择题干里的空还在');
 
   /* ---------- 2. 首页: 模拟考试 + 练习 ---------- */
-  ok(qa('.subject-tab').length === 2, '两个科目标签 (英语/数据结构)',
+  ok(qa('.subject-tab').map(function (x) { return x.textContent; }).join(',') ===
+    '英语,操作系统,数据结构', '三个科目标签, 顺序照旧',
     qa('.subject-tab').map(function (x) { return x.textContent; }).join(','));
   click('[data-subject="数据结构"]');
   ok(txt('.hero h1') === '数据结构刷题', '切到数据结构', txt('.hero h1'));
-  ok(txt('.hero p') === '单选题 / 填空题 / 名词解释 · 共 49 题 · 满分 138 分',
-    '首页文案', txt('.hero p'));
+  ok(txt('.hero p') === '单选题 / 填空题 / 名词解释 · 共 49 题 · 满分 78 分 · 另有 10 题看答案',
+    '首页文案: 名词解释不计分, 单说一句"另有 10 题看答案"', txt('.hero p'));
   ok(!!q('[data-action="start-exam"]'), '摆出了模拟考试入口');
   ok(txt('.mode-card.primary .t') === '模拟考试', '模拟考试成了主入口', txt('.mode-card.primary .t'));
   ok(stat(0) === '49' && stat(1) === '0' && stat(2) === '—', '题库总数 / 错题本 / 最近得分',
@@ -106,9 +115,11 @@
   ok(txt('[data-scope="type:single"] .t') === '单选题 · 全部 20 题', txt('[data-scope="type:single"] .t'));
   ok(txt('[data-scope="type:single"] .d') === '每题 2 分 · 满分 40 分', txt('[data-scope="type:single"] .d'));
   ok(txt('[data-scope="type:blank"] .t') === '填空题 · 全部 19 题', txt('[data-scope="type:blank"] .t'));
-  ok(txt('[data-scope="type:blank"] .d') === '每题 2 分 · 满分 38 分', txt('[data-scope="type:blank"] .d'));
+  ok(txt('[data-scope="type:blank"] .d') === '每题 2 分 · 满分 38 分 · 填完自动判分',
+    txt('[data-scope="type:blank"] .d'));
   ok(txt('[data-scope="type:term"] .t') === '名词解释 · 全部 10 题', txt('[data-scope="type:term"] .t'));
-  ok(txt('[data-scope="type:term"] .d') === '每题 6 分 · 满分 60 分', txt('[data-scope="type:term"] .d'));
+  ok(txt('[data-scope="type:term"] .d') === '直接看参考答案 · 不计分',
+    '名词解释那张卡不再写分, 改说"直接看参考答案"', txt('[data-scope="type:term"] .d'));
   ok(qa('.sub-row').length === 0, '每个题型只有一个分节, 不展开子行', qa('.sub-row').length);
 
   /* ---------- 4. 单选题: 答错回显正确答案 ---------- */
@@ -124,7 +135,7 @@
     txt('.qcard .feedback'));
   click('[data-action="exit-session"]');
 
-  /* ---------- 5. 填空题: 写答案 -> 自评 -> 给参考答案 ---------- */
+  /* ---------- 5. 填空题: 提交后自动判分 (拿写的和题库答案比对) ---------- */
   click('[data-action="goto-practice"]');
   click('[data-scope="type:blank"]');
   const c2 = q('.qcard');
@@ -133,70 +144,88 @@
   ok(!c2.querySelector('.tl-source'), '填空题没有"原文"框 (没有原文可给)');
   const ta = c2.querySelector('#tl-input');
   ok(!!ta, '有写答案的输入框');
+  ok(ta.tagName === 'INPUT', '自动判分的填空是单行输入框 (答案就一两个词)', ta.tagName);
   ok(ta.placeholder === '写出你的答案...', '提示语是"写出你的答案"', ta.placeholder);
-  ok(txt('#tl-ok') === '我答对了 (+2 分)', '按钮写的是"我答对了"', txt('#tl-ok'));
-  ok(q('#tl-ok').disabled && q('#tl-bad').disabled, '没写字之前判不了');
-  ok(!c2.querySelector('.tl-ref'), '没判之前不给参考答案');
-  typeInto(ta, '数据');
-  ok(!q('#tl-ok').disabled, '写了字就能判');
+  ok(!c2.querySelector('#tl-bad'), '没有"我答错了"这种自评按钮');
+  ok(q('#tl-ok').disabled, '没写字之前提交不了');
+  ok(!c2.querySelector('.tl-ref'), '没提交之前不给答案');
+  ok(txt('.qcard .tl-actions .hint') === '填完提交, 和题库答案比对', '说明写着比对',
+    txt('.qcard .tl-actions .hint'));
+  // 故意多打空格、末尾加句号: 归一化之后仍算对
+  typeInto(ta, ' 数据。');
+  ok(!q('#tl-ok').disabled, '写了字就能提交');
   click('#tl-ok');
-  ok(txt('.qcard .feedback') === '✓ 自评正确', '判对给个"自评正确"', txt('.qcard .feedback'));
-  ok(txt('.qcard .tl-ref-head') === '参考答案', '判完给的是"参考答案"', txt('.qcard .tl-ref-head'));
-  ok(txt('.qcard .tl-ref p') === '数据', '参考答案的内容', txt('.qcard .tl-ref p'));
+  ok(txt('.qcard .feedback') === '✓ 回答正确', '判对给"回答正确"', txt('.qcard .feedback'));
+  ok(txt('.qcard .tl-ref-head') === '正确答案', '判完给的是"正确答案" (机判, 不再是"参考")',
+    txt('.qcard .tl-ref-head'));
+  ok(txt('.qcard .tl-ref p') === '数据', '正确答案的内容', txt('.qcard .tl-ref p'));
 
-  /* ---------- 6. 填空题: 判错进错题本, 参考答案照给 ---------- */
+  /* ---------- 6. 填空题: 答错进错题本, 正确答案照给 ---------- */
   click('[data-action="next"]');
   ok(q('.qcard').getAttribute('data-qid') === 'lx2-2', '翻到填空题第 2 题',
     q('.qcard').getAttribute('data-qid'));
   typeInto(q('.qcard #tl-input'), '时间');
-  click('#tl-bad');
-  ok(txt('.qcard .feedback') === '✗ 自评错误, 已记入错题本', '判错提示', txt('.qcard .feedback'));
-  ok(txt('.qcard .tl-ref p') === '时间、空间', '判错也给参考答案', txt('.qcard .tl-ref p'));
+  click('#tl-ok');
+  ok(txt('.qcard .feedback') === '✗ 回答错误, 已记入错题本', '答错提示', txt('.qcard .feedback'));
+  ok(txt('.qcard .tl-ref p') === '时间、空间', '答错也给正确答案', txt('.qcard .tl-ref p'));
+
+  /* ---------- 6b. 字母大小写也不算错 (第 11 题的答案是 n-i+1) ---------- */
+  for (let i = 0; i < 9; i++) click('[data-action="next"]');
+  ok(q('.qcard').getAttribute('data-qid') === 'lx2-11', '翻到第 11 题',
+    q('.qcard').getAttribute('data-qid'));
+  const ta11 = q('.qcard #tl-input');
+  typeInto(ta11, 'N-I+1');
+  ta11.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  ok(txt('.qcard .feedback') === '✓ 回答正确', '大写的 N-I+1 也算对 (回车直接提交)',
+    txt('.qcard .feedback'));
+  ok(txt('.qcard .tl-ref p') === 'n-i+1', '题库答案是 n-i+1', txt('.qcard .tl-ref p'));
   click('[data-action="exit-session"]');
 
-  /* ---------- 7. 名词解释: 每题 6 分, 做满一整套到成绩单 ---------- */
+  /* ---------- 7. 名词解释: 直接看参考答案, 不用作答 ---------- */
   click('[data-action="goto-practice"]');
   click('[data-scope="type:term"]');
-  ok(txt('.qcard .qmeta').indexOf('6 分') > 0, '名词解释每题 6 分', txt('.qcard .qmeta'));
-  ok(txt('#tl-ok') === '我答对了 (+6 分)', '按钮上的分跟着题型走', txt('#tl-ok'));
+  const t1 = q('.qcard');
+  ok(t1.getAttribute('data-qid') === 'lx3-1', '名词解释从第一题开始', t1.getAttribute('data-qid'));
+  ok(txt('.qcard .qmeta').indexOf('名词解释') === 0 && txt('.qcard .qmeta').indexOf('分') < 0,
+    '题头写"名词解释"但不写分 (看答案的题 0 分)', txt('.qcard .qmeta'));
+  ok(!t1.querySelector('#tl-input') && !t1.querySelector('#tl-ok') &&
+     !t1.querySelector('#tl-bad'), '没有输入框也没有自评按钮');
+  ok(txt('.qcard .tl-ref-head') === '参考答案', '参考答案当场就在', txt('.qcard .tl-ref-head'));
+  ok(txt('.qcard .tl-ref p').indexOf('存储结构') > 0, '答案的内容', txt('.qcard .tl-ref p').slice(0, 30));
   let allCards = true;
   for (let i = 0; i < 10; i++) {
-    const card = q('.qcard');
-    if (!card) { allCards = false; break; }
-    typeInto(card.querySelector('#tl-input'), '我写的第 ' + (i + 1) + ' 个名词解释');
-    click(i === 0 ? '#tl-bad' : '#tl-ok');
+    if (!q('.qcard')) { allCards = false; break; }
     if (i < 9) click('[data-action="next"]');
   }
-  ok(allCards && q('.qcard').getAttribute('data-qid') === 'lx3-10', '十道名词解释逐题翻完',
+  ok(allCards && q('.qcard').getAttribute('data-qid') === 'lx3-10', '十道名词解释点"下一题"翻完',
     q('.qcard') && q('.qcard').getAttribute('data-qid'));
   ok(!!q('[data-action="finish-practice"]'), '最后一题给出"完成练习"');
   click('[data-action="finish-practice"]');
 
   ok(!!q('.score-card'), '练习结束有成绩单');
   ok(!q('.score-types'), '练习成绩单不按题型拆对错 (那是模拟考试那页的事)');
-  const w1 = qa('.review-item')[0];
-  ok(!!w1 && w1.textContent.indexOf('逻辑结构') >= 0, '回顾里第一条就是刚答错的那道',
-    w1 && w1.textContent.slice(0, 30));
-  ok(!!w1 && w1.textContent.indexOf('你的答案: 我写的第 1 个名词解释') >= 0, '回顾里回显我写的答案',
-    w1 && w1.textContent.slice(0, 60));
-  ok(!!w1 && w1.textContent.indexOf('参考答案: ') >= 0, '回顾里给出参考答案');
+  ok(txt('.score-num') === '10 题', '没有分可算, 成绩单报题数', txt('.score-num'));
+  ok(txt('.score-sub').indexOf('看参考答案') > 0, '说明写着看参考答案', txt('.score-sub'));
+  const d7 = qa('.score-detail b').map(function (b) { return b.textContent; }).join('/');
+  ok(d7 === '0/0/0/10', '明细只有一看答案 10', d7);
+  ok(qa('.review-item.view').length === 10, '回顾里 10 条看答案', qa('.review-item.view').length);
 
-  /* ---------- 8. 错题本: 三道题, 隔离在数据结构这边 ---------- */
+  /* ---------- 8. 错题本: 两道题, 隔离在数据结构这边 ---------- */
   click('[data-action="home"]');
-  ok(stat(1) === '3', '三道错题都进了错题本 (单选/填空/名词解释各一)', stat(1));
+  ok(stat(1) === '2', '两道错题进了错题本 (单选/填空各一)', stat(1));
   click('[data-action="open-wrongbook"]');
   const items = qa('.review-item');
-  ok(items.length === 3, '错题本三题', items.length);
-  const single = items.filter(function (x) { return x.textContent.indexOf('正确答案: ') >= 0; })[0];
-  ok(!!single && single.textContent.indexOf('上次: ') >= 0, '选择题错题照旧给"正确答案"和"上次"');
+  ok(items.length === 2, '错题本两题 (名词解释看答案, 不进错题本)', items.length);
+  // 自动判分的填空错题现在也说"正确答案", 所以靠"上次"这一行认选择题
+  const single = items.filter(function (x) { return x.textContent.indexOf('上次: ') >= 0; })[0];
+  ok(!!single && single.textContent.indexOf('正确答案: ') >= 0, '选择题错题照旧给"正确答案"和"上次"');
   const blank = items.filter(function (x) { return x.textContent.indexOf('时间、空间') >= 0; })[0];
   ok(!!blank, '填空题错题在错题本里');
-  ok(!!blank && blank.textContent.indexOf('参考答案: 时间、空间') >= 0, '错题本给参考答案',
+  ok(!!blank && blank.textContent.indexOf('正确答案: 时间、空间') >= 0, '填空错题给正确答案',
     blank && blank.textContent.slice(0, 60));
-  const term = items.filter(function (x) { return x.textContent.indexOf('逻辑结构') >= 0; })[0];
-  ok(!!term && term.textContent.indexOf('参考答案: ') >= 0, '名词解释错题也给参考答案');
-  ok(!!term && term.textContent.indexOf('正确答案') < 0 && term.textContent.indexOf('上次') < 0,
-    '文字题错题不说"正确答案"/"上次"');
+  ok(!!blank && blank.textContent.indexOf('上次') < 0, '填空题错题不说"上次" (没有选项下标可记)');
+  ok(!items.some(function (x) { return x.textContent.indexOf('逻辑结构') >= 0; }),
+    '名词解释（看答案的题）不在错题本里');
 
   /* ---------- 9. 英语一点没受影响 ---------- */
   click('[data-action="home"]');

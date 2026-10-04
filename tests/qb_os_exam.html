@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>操作系统模拟考试测试</title>
+<link rel="stylesheet" href="../styles.css">
+<script>try { localStorage.clear(); } catch (e) {}</script>
+</head>
+<body>
+<div class="app" id="app"></div>
+<script src="../questions.js"></script>
+<script src="../explanations.js"></script>
+<script src="../essay-rubrics.js"></script>
+<script src="../dict.js"></script>
+<script src="../app.js"></script>
+<script>
+(function () {
+  const out = [];
+  let pass = 0, fail = 0;
+  function ok(cond, name, extra) {
+    if (cond) { pass++; out.push('PASS  ' + name); }
+    else { fail++; out.push('FAIL  ' + name + (extra != null ? '  → ' + extra : '')); }
+  }
+  function q(sel) { return document.querySelector(sel); }
+  function qa(sel) { return Array.prototype.slice.call(document.querySelectorAll(sel)); }
+  function txt(sel) { const el = q(sel); return el ? el.textContent : null; }
+  function click(sel) {
+    const el = typeof sel === 'string' ? q(sel) : sel;
+    if (!el) throw new Error('找不到元素: ' + sel);
+    el.click();
+    return el;
+  }
+  function toggle(action, on) {
+    const cb = q('[data-action="' + action + '"]');
+    if (!cb) throw new Error('找不到勾选框: ' + action);
+    cb.checked = on;
+    cb.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  // 往输入框里打字: 应用只认 input 事件, 直接改 value 是不算数的
+  function typeInto(el, value) {
+    el.value = value;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  function prefs() { return JSON.parse(localStorage.getItem('qb_prefs_v1') || '{}'); }
+
+  let lastConfirm = '';
+  window.confirm = function (msg) { lastConfirm = msg; return true; };
+  window.alert = function () {};
+
+  const BANK = window.QUESTION_BANKS['操作系统'];
+  const ALL = BANK.questions;
+  function byId(id) { return ALL.filter(function (x) { return x.id === id; })[0]; }
+  function cards() { return qa('.qcard'); }
+  function cardFor(qid) {
+    return cards().filter(function (c) { return c.getAttribute('data-qid') === qid; })[0] || null;
+  }
+  function curId() { return cards().length ? cards()[0].getAttribute('data-qid') : null; }
+  function optionTexts(card) {
+    return [].map.call(card.querySelectorAll('.option .text'), function (e) { return e.textContent; });
+  }
+  // 按选项文本找按钮 —— 乱序时下标不能信, 只能认文本
+  function optionByText(card, text) {
+    return [].filter.call(card.querySelectorAll('.option'), function (b) {
+      return b.querySelector('.text').textContent === text;
+    })[0] || null;
+  }
+  function qCount() { return qa('.nav-grid .nav-btn').length; }
+  function gotoQ(i) { click(q('.nav-grid .nav-btn[data-index="' + i + '"]')); return cards(); }
+  function navAnswered(i) {
+    const b = q('.nav-grid .nav-btn[data-index="' + i + '"]');
+    return !!(b && b.classList.contains('answered'));
+  }
+  // 首页那几个勾选框: "动作:标签文字"
+  function optRows() {
+    return qa('.mode-opt').map(function (row) {
+      return row.querySelector('input').getAttribute('data-action') + ':' +
+        row.querySelector('span').textContent;
+    });
+  }
+  // 成绩单上按题型拆的那几行: "题型id:名字:对 N:错 M(:未答 K)"
+  function typeRows() {
+    return qa('.score-types .type-row').map(function (row) {
+      const nums = [].map.call(row.querySelectorAll('.num'), function (n) { return n.textContent; });
+      return row.getAttribute('data-type') + ':' + row.querySelector('.name').textContent + ':' +
+        nums.join(':');
+    });
+  }
+  function wrongCount() {
+    return parseInt(txt('[data-action="open-wrongbook"] .t').match(/(\d+)/)[1], 10);
+  }
+
+  try {
+
+  /* ---------- 1. 数据层: 单选/填空各 2 分, 抽 15 题 ---------- */
+  const SINGLES = ALL.filter(function (x) { return x.type === 'single'; });
+  const BLANKS = ALL.filter(function (x) { return x.type === 'blank'; });
+  ok(SINGLES.length === 30 && BLANKS.length === 20, '30 单选 / 20 填空',
+    SINGLES.length + '/' + BLANKS.length);
+  ok(SINGLES.every(function (x) { return x.score === 2; }) &&
+     BLANKS.every(function (x) { return x.score === 2; }), '单选和填空都是每题 2 分');
+  ok(BANK.settings.examEnabled !== false, '这个科目进模拟考试');
+  ok(BANK.settings.randomPick === 15, '"随机抽 15 题"是从题库设置里读的', BANK.settings.randomPick);
+  ok(BANK.settings.blankAuto === true, '填空题是自动判分的');
+  // 解答题/综合计算题 0 分又不考试, 别混进卷子
+  // 填空题也是 exam:false (它不占单选考位, 走首页的勾选框加进来)
+  ok(BANK.types.filter(function (t) { return t.exam === false; }).map(function (t) { return t.id; })
+    .join(',') === 'blank,answer,compute', '解答题/综合计算题不进考试',
+    BANK.types.filter(function (t) { return t.exam === false; }).map(function (t) { return t.id; }).join(','));
+
+  click('[data-subject="操作系统"]');
+  ok(txt('.hero p') === '单选题 / 填空题 / 解答题 / 综合计算题 · 共 66 题 · 满分 100 分 · 另有 16 题看答案',
+    '首页满分 100 (50 题 × 2 分)', txt('.hero p'));
+
+  /* ---------- 2. 首页三个勾选框, 顺序固定 ---------- */
+  ok(optRows().join(' | ') ===
+    'toggle-shuffle:选项位置随机打乱 | toggle-random:随机抽取 15 题 | ' +
+    'toggle-blank:加入填空题 (随机 10 道, 20 分)',
+    '三个勾选框按 乱序 / 抽题 / 填空 排', optRows().join(' | '));
+  ok(qa('.mode-opt').every(function (row) { return !row.querySelector('input').checked; }),
+    '默认一个都不勾');
+  ok(txt('.mode-card.primary .d') === '全部 30 题 · 满分 60 分', '不勾任何框: 30 题 60 分',
+    txt('.mode-card.primary .d'));
+  ok(txt('[data-hint="random"]') === '不勾选则考全部 30 题', txt('[data-hint="random"]'));
+  ok(txt('[data-hint="blank"]') === '不勾选则考试里没有填空题', txt('[data-hint="blank"]'));
+
+  /* ---------- 3. 勾"随机抽取 15 题": 15 道单选 30 分 ---------- */
+  toggle('toggle-random', true);
+  const d3 = txt('.mode-card.primary .d');
+  ok(d3.indexOf('从 30 题中随机抽 15 题') === 0, '抽题说明写的是 15 题', d3);
+  ok(d3.indexOf('满分 30 分') > 0, '15×2 = 30 分', d3);
+  ok(q('[data-hint="random"]').textContent.indexOf('只影响单选题') > 0, '抽题只洗单选题',
+    txt('[data-hint="random"]'));
+
+  /* ---------- 4. 再勾"加入填空题": 15 单选 + 10 填空 = 50 分 ---------- */
+  toggle('toggle-blank', true);
+  const d4 = txt('.mode-card.primary .d');
+  ok(d4.indexOf('从 30 题中随机抽 15 题 + 填空题 10 题') === 0, '卷面 = 15 单选 + 10 填空', d4);
+  ok(d4.indexOf('满分 50 分') > 0, '30 + 20 = 50 分', d4);
+  ok(d4.indexOf('填空题 10 题 20 分 (每题 2 分)') > 0, '填空那段分值说明', d4);
+  ok(txt('[data-hint="blank"]') === '随机抽 10 道填空题 (每题 2 分), 一题一页, 交卷时统一比对答案',
+    txt('[data-hint="blank"]'));
+  ok(prefs().withBlank === true && prefs().sampleQuestions === true, '两个勾都写进了 localStorage',
+    JSON.stringify(prefs()));
+
+  /* ---------- 5. 开考: 25 题, 前 15 单选后 10 填空 ---------- */
+  click('[data-action="start-exam"]');
+  ok(txt('.progress-wrap span') === '第 1 / 25 题', '25 题逐题翻', txt('.progress-wrap span'));
+  ok(qCount() === 25, '答题卡 25 格', qCount());
+  const badge = txt('.topbar .badge');
+  ok(badge.indexOf('随机抽题 15') >= 0 && badge.indexOf('填空 10 题') > 0, '顶栏两个标记', badge);
+  ok(txt('.qcard .qmeta').indexOf('单选题') === 0 && txt('.qcard .qmeta').indexOf('· 2 分') > 0,
+    '第一页是单选, 2 分', txt('.qcard .qmeta'));
+
+  const pickedSingles = [];
+  for (let i = 0; i < 15; i++) { gotoQ(i); pickedSingles.push(curId()); }
+  ok(pickedSingles.every(function (id) { return byId(id).type === 'single'; }), '前 15 题都是单选',
+    pickedSingles.join(','));
+  ok(new Set(pickedSingles).size === 15, '抽的 15 道单选不重复');
+  const pickedBlanks = [];
+  for (let i = 15; i < 25; i++) { gotoQ(i); pickedBlanks.push(curId()); }
+  ok(pickedBlanks.every(function (id) { return byId(id).type === 'blank'; }), '后 10 题都是填空',
+    pickedBlanks.join(','));
+  ok(new Set(pickedBlanks).size === 10, '抽的 10 道填空不重复');
+  ok(pickedSingles.concat(pickedBlanks).every(function (id) {
+    return ['single', 'blank'].indexOf(byId(id).type) >= 0;
+  }), '卷子里没有解答题/综合计算题');
+
+  /* ---------- 6. 考试里的填空题: 只写不判, 交卷时统一比对 ---------- */
+  gotoQ(15);
+  ok(txt('.qcard .qmeta').indexOf('填空题') === 0 && txt('.qcard .qmeta').indexOf('· 2 分') > 0,
+    '填空题 2 分', txt('.qcard .qmeta'));
+  ok(!q('.qcard .option'), '填空题没有选项');
+  const blankInput = q('#tl-input');
+  ok(!!blankInput && blankInput.tagName === 'INPUT', '单行输入框', blankInput && blankInput.tagName);
+  ok(!q('[data-action="self-ok"]') && !q('[data-action="self-bad"]'), '没有自评按钮');
+  ok(!q('[data-action="submit-blank"]'), '考试里也没有"提交答案" (交卷时才判)');
+  ok(txt('.qcard .tl-actions .hint') === '交卷时统一和题库答案比对', '说明写着交卷时统一比对',
+    txt('.qcard .tl-actions .hint'));
+  ok(!q('.qcard .tl-ref'), '答案没提前露出来');
+  ok(!navAnswered(15), '一个字没写, 答题卡那格不算已答');
+  const myBlank = byId(pickedBlanks[0]);
+  typeInto(blankInput, myBlank.ref);
+  ok(txt('#answered-count') === '已答 1', '"已答"计数器跟着走, 不用等翻页',
+    txt('#answered-count'));
+  // 翻走再翻回来: 答题卡那格亮了(答题卡是翻页时重画的), 写的答案也还在
+  gotoQ(0); gotoQ(15);
+  ok(navAnswered(15), '写上了就算已答');
+  ok(q('#tl-input').value === myBlank.ref, '翻页回来答案还在', q('#tl-input').value);
+  ok(!q('.qcard .tl-ref'), '写完了也不当场判, 还是不给答案');
+
+  /* ---------- 7. 全答对: 15×2 + 10×2 = 50 分 ---------- */
+  for (let i = 0; i < 15; i++) {
+    gotoQ(i);
+    const item = byId(curId());
+    const btn = optionByText(cardFor(item.id), item.options[item.answer]);
+    if (btn) click(btn);
+  }
+  for (let i = 15; i < 25; i++) {
+    gotoQ(i);
+    const item = byId(curId());
+    // 第 2 道故意加空格和句号: 归一化之后照样算对
+    const text = (i === 16) ? ('  ' + item.ref + '。') : item.ref;
+    typeInto(q('#tl-input'), text);
+  }
+  ok(txt('#answered-count') === '已答 25', '25 题全部已答', txt('#answered-count'));
+  click('[data-action="submit-exam"]');
+  ok(lastConfirm === '确定提交试卷?', '都答完了, 提交时不再问"还有几题未作答"', lastConfirm);
+  ok(txt('.score-num') === '50 分', '满分 50 拿满', txt('.score-num'));
+  ok(txt('.score-sub').indexOf('满分 50 分') > 0 && txt('.score-sub').indexOf('得分率 100%') > 0,
+    '满分 50 / 100%', txt('.score-sub'));
+  ok(txt('.score-sub').indexOf('抽15题') > 0 && txt('.score-sub').indexOf('含填空') > 0,
+    '成绩单标了抽题/填空', txt('.score-sub'));
+  ok(qa('.score-detail b').map(function (b) { return b.textContent; }).join('/') === '25/0/0',
+    '25 题全对', qa('.score-detail b').map(function (b) { return b.textContent; }).join('/'));
+  ok(typeRows().join(' | ') === 'single:单选题:对 15:错 0 | blank:填空题:对 10:错 0',
+    '成绩单按题型拆两行', typeRows().join(' | '));
+  // 考试成绩单默认"只看错题/未答", 全对时回顾是空的; 关掉它才看得见对的那几道
+  const only = q('[data-action="toggle-wrong-only"]');
+  only.checked = false;
+  only.dispatchEvent(new Event('change', { bubbles: true }));
+  ok(qa('.review-item').length === 25, '关掉筛选, 回顾里 25 条', qa('.review-item').length);
+  // 回顾里的填空题: 你的答案 + 正确答案 (机判, 不是"参考答案")
+  const reviewBlank = qa('.review-item').filter(function (el) {
+    return el.querySelector('.qmeta').textContent.indexOf('填空题') === 0;
+  })[0];
+  ok(!!reviewBlank && reviewBlank.textContent.indexOf('你的答案: ') > 0, '回顾里有"你的答案"',
+    reviewBlank && reviewBlank.textContent.slice(0, 50));
+  ok(!!reviewBlank && reviewBlank.textContent.indexOf('正确答案: ') > 0, '回顾里给"正确答案"',
+    reviewBlank && reviewBlank.textContent.slice(0, 50));
+  ok(!!reviewBlank && reviewBlank.querySelector('.tag.ok').textContent === '正确', '回顾里标"正确"');
+
+  click('[data-action="home"]');
+  ok(txt('.history-item .score') === '50 / 50', '历史记录 50 / 50', txt('.history-item .score'));
+  ok(wrongCount() === 0, '全对, 错题本是空的', String(wrongCount()));
+  const histText = q('.history-item').textContent;
+  ok(histText.indexOf('含填空') > 0 && histText.indexOf('抽15题') > 0, '历史记录标题也带这两个标记',
+    histText.slice(0, 60));
+
+  /* ---------- 8. 第二场 (乱序): 错的和未答的分开数 ---------- */
+  toggle('toggle-shuffle', true);
+  click('[data-action="start-exam"]');
+  let differed = 0, badSet = 0, wrongPick = null;
+  for (let i = 0; i < 15; i++) {
+    gotoQ(i);
+    const item = byId(curId());
+    const card = cardFor(item.id);
+    const shown = optionTexts(card);
+    if (shown.join('|') !== item.options.join('|')) differed++;
+    if (shown.slice().sort().join('|') !== item.options.slice().sort().join('|')) badSet++;
+    // 每道都挑一个错的选项 (乱序后下标不能信, 按文本找)
+    const wrongText = item.options.filter(function (t, idx) { return idx !== item.answer; })[0];
+    if (!wrongPick) {
+      wrongPick = { id: item.id, orig: item.options.indexOf(wrongText), text: wrongText };
+    }
+    const btn = optionByText(card, wrongText);
+    if (btn) click(btn);
+  }
+  ok(badSet === 0, '乱序后还是那四个选项, 没丢没重', badSet);
+  ok(differed >= 8, '15 道里大多数顺序确实变了', differed + '/15');
+  // 填空: 前 5 道写错的, 后 5 道一个字不写
+  for (let i = 15; i < 20; i++) { gotoQ(i); typeInto(q('#tl-input'), '乱写的答案'); }
+  gotoQ(24);
+  ok(!q('[data-action="submit-blank"]'), '乱序和填空互不干扰, 考试里照样没有提交按钮');
+  click('[data-action="submit-exam"]');
+  ok(lastConfirm === '还有 5 题未作答, 确定提交?', '留空的 5 道算未答, 提交前提示',
+    lastConfirm);
+  ok(typeRows().join(' | ') === 'single:单选题:对 0:错 15 | blank:填空题:对 0:错 5:未答 5',
+    '错和未答分开数', typeRows().join(' | '));
+  ok(txt('.score-num') === '0 分', '全错 0 分', txt('.score-num'));
+
+  // 考试成绩单默认就只看错题/未答, 这一场全错+未答, 正好都摆着
+  ok(qa('.review-item').length === 25, '回顾里 25 条 (错的和未答的)', qa('.review-item').length);
+  const blankItems = qa('.review-item').filter(function (el) {
+    return el.querySelector('.qmeta').textContent.indexOf('填空题') === 0;
+  });
+  const skippedBlank = blankItems.filter(function (el) { return el.querySelector('.tag.skip'); })[0];
+  ok(!!skippedBlank, '没写的填空题标"未答"');
+  const wrongBlank = blankItems.filter(function (el) { return el.querySelector('.tag.no'); })[0];
+  ok(!!wrongBlank, '写错的填空题标"错误"');
+  if (wrongBlank) {
+    ok(wrongBlank.textContent.indexOf('正确答案: ') > 0, '填空错题给"正确答案"',
+      wrongBlank.textContent.slice(0, 60));
+    ok(wrongBlank.textContent.indexOf('上次') < 0, '填空错题不说"上次" (没有选项下标可记)');
+  }
+  if (skippedBlank) {
+    ok(skippedBlank.textContent.indexOf('正确答案: ') > 0, '未答的填空也给正确答案',
+      skippedBlank.textContent.slice(0, 60));
+  }
+
+  click('[data-action="home"]');
+  // 15 单选错 + 5 填空错 + 5 填空未答, 都进错题本
+  ok(wrongCount() === 25, '错的和未答的都进错题本', wrongCount());
+  click('[data-action="open-wrongbook"]');
+  const items = qa('.review-item');
+  ok(items.length === 25, '错题本 25 条', items.length);
+  // 按题卡标注精确找那条单选错题 (错题本按出错时间排序, 不能拿第一条顶)
+  const singleItem = items.filter(function (el) {
+    return wrongPick && el.querySelector('.qmeta').textContent.indexOf('单选题') === 0 &&
+      el.textContent.indexOf(wrongPick.text) >= 0;
+  })[0];
+  ok(!!singleItem, '答错的那道单选在错题本里', wrongPick && wrongPick.text);
+  if (singleItem && wrongPick) {
+    const line = [].filter.call(singleItem.querySelectorAll('.review-line'), function (l) {
+      return l.textContent.indexOf('上次') === 0;
+    })[0];
+    const shownText = line.querySelector('b').textContent;
+    const letter = 'ABCD'[wrongPick.orig];
+    ok(shownText === letter + '. ' + wrongPick.text, '乱序下标换算回原始下标 (' + letter + ')', shownText);
+  }
+
+  /* ---------- 9. 别的科目没被带跑 ---------- */
+  click('[data-action="home"]');
+  toggle('toggle-shuffle', false);
+  toggle('toggle-random', false);
+  toggle('toggle-blank', false);
+  click('[data-subject="数据结构"]');
+  ok(txt('.hero p') === '单选题 / 填空题 / 名词解释 · 共 49 题 · 满分 78 分 · 另有 10 题看答案',
+    '数据结构题库没变 (名词解释也改成看答案的题了)', txt('.hero p'));
+  ok(!q('[data-action="toggle-term"]'), '数据结构的"加入名词解释"勾选框也没了');
+  ok(txt('.mode-card.primary .d') === '全部 20 题 · 满分 40 分', '数据结构的卷面照旧',
+    txt('.mode-card.primary .d'));
+  ok(txt('[data-hint="blank"]') === '不勾选则考试里没有填空题', '数据结构也有填空勾选框',
+    txt('[data-hint="blank"]'));
+  toggle('toggle-blank', true);
+  ok(txt('[data-hint="blank"]').indexOf('交卷时统一比对答案') > 0,
+    '数据结构的填空也跟着开了自动判分 (两个科目一样的节奏)', txt('[data-hint="blank"]'));
+  toggle('toggle-blank', false);
+
+  click('[data-subject="english"]');
+  ok(txt('.mode-card.primary .d') === '全部 40 题 · 满分 40 分', '英语卷面照旧',
+    txt('.mode-card.primary .d'));
+  ok(optRows().join(' | ') ===
+    'toggle-shuffle:选项位置随机打乱 | toggle-random:随机抽取 20 题 | ' +
+    'toggle-essay:加入写作 (随机 1 篇, 20 分) | toggle-reading:加入阅读理解 (随机 4 篇, 50 分) | ' +
+    'toggle-sentrans:加入单句翻译 (随机 5 题, 10 分)',
+    '英语还是那五个勾选框, 抽题仍是 20', optRows().join(' | '));
+
+  } catch (err) {
+    ok(false, '用例执行没抛异常', err && (err.message + ' | ' + String(err.stack || '').split('\n')[1]));
+  }
+
+  /* ---------- 结果 ---------- */
+  out.unshift('共 ' + (pass + fail) + ' 条, 通过 ' + pass + ', 失败 ' + fail);
+  const pre = document.createElement('pre');
+  pre.id = 'out';
+  pre.textContent = out.join('\n');
+  document.body.appendChild(pre);
+})();
+</script>
+</body>
+</html>

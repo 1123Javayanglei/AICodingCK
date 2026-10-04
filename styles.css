@@ -542,6 +542,12 @@ details.navigator[open] summary::before { content: "▾ "; }
   background: var(--card);
 }
 .tl-input:disabled { color: var(--muted); }
+/* 自动判分的填空题: 答案就一两个词, 单行输入框, 别撑成一个文本框 */
+.tl-input-line {
+  min-height: 0;
+  padding: 11px 14px;
+  resize: none;
+}
 .tl-actions {
   display: flex;
   align-items: center;
@@ -747,6 +753,38 @@ details.navigator[open] summary::before { content: "▾ "; }
 .tag.ok { background: var(--green-soft); color: var(--green); }
 .tag.no { background: var(--red-soft); color: var(--red); }
 .tag.skip { background: var(--border); color: var(--muted); }
+.tag.view { background: var(--primary-soft); color: var(--primary); }
+.review-item.view { border-left-color: var(--primary); }
+
+/* 解答题 / 综合计算题: 题干和参考答案都是整段文字, 里面还有列表、表格和代码块 */
+.stem-lines p { margin: 0 0 8px; }
+.stem-lines p:last-child { margin-bottom: 18px; }
+.rich > :last-child { margin-bottom: 0; }
+.rich p { margin: 0 0 8px; font-size: 15px; line-height: 1.9; color: var(--text); }
+.rich-list { margin: 0 0 10px; padding-left: 22px; }
+.rich-list li { font-size: 15px; line-height: 1.9; margin-bottom: 4px; }
+.rich-code {
+  margin: 0 0 10px;
+  padding: 12px 14px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-x: auto;
+}
+.rich-table {
+  border-collapse: collapse;
+  margin: 0 0 10px;
+  font-size: 14px;
+  white-space: nowrap;
+}
+.rich-table th, .rich-table td {
+  border: 1px solid var(--border);
+  padding: 4px 10px;
+  text-align: center;
+}
+.rich-table th { background: var(--bg); font-weight: 600; }
 
 @media (max-width: 560px) {
   .app { padding: 16px 12px 60px; }

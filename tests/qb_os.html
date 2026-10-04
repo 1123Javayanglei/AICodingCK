@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>操作系统科目测试</title>
+<link rel="stylesheet" href="../styles.css">
+<script>try { localStorage.clear(); } catch (e) {}</script>
+</head>
+<body>
+<div class="app" id="app"></div>
+<script src="../questions.js"></script>
+<script src="../explanations.js"></script>
+<script src="../essay-rubrics.js"></script>
+<script src="../dict.js"></script>
+<script src="../app.js"></script>
+<script>
+(function () {
+  const out = [];
+  let pass = 0, fail = 0;
+  function ok(cond, name, extra) {
+    if (cond) { pass++; out.push('PASS  ' + name); }
+    else { fail++; out.push('FAIL  ' + name + (extra != null ? '  → ' + extra : '')); }
+  }
+  function q(sel) { return document.querySelector(sel); }
+  function qa(sel) { return Array.prototype.slice.call(document.querySelectorAll(sel)); }
+  function txt(sel) { const el = q(sel); return el ? el.textContent : null; }
+  function click(sel) {
+    const el = typeof sel === 'string' ? q(sel) : sel;
+    if (!el) throw new Error('找不到元素: ' + sel);
+    el.click();
+    return el;
+  }
+  // 往输入框里打字: 应用只认 input 事件, 直接改 value 是不算数的
+  function typeInto(el, value) {
+    el.value = value;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  function stat(i) { const els = qa('.stat b'); return els[i] ? els[i].textContent : null; }
+
+  window.confirm = function () { return true; };
+  window.alert = function () {};
+
+  try {
+
+  /* ---------- 1. 题库数据 ---------- */
+  const BANK = window.QUESTION_BANKS['操作系统'];
+  ok(!!BANK, '题库里有"操作系统"这个科目');
+  const ALL = BANK.questions;
+  function byId(id) { return ALL.filter(function (x) { return x.id === id; })[0]; }
+  function byType(t) { return ALL.filter(function (x) { return x.type === t; }); }
+
+  ok(ALL.length === 66, '共 66 题 (单选 30 + 填空 20 + 解答 12 + 综合计算 4)', ALL.length);
+  ok(byType('single').length === 30 && byType('blank').length === 20 &&
+    byType('answer').length === 12 && byType('compute').length === 4, '题型分布 30/20/12/4',
+    [byType('single').length, byType('blank').length, byType('answer').length, byType('compute').length].join('/'));
+  ok(BANK.types.map(function (t) { return t.name; }).join('/') === '单选题/填空题/解答题/综合计算题',
+    '题型表就这四种', BANK.types.map(function (t) { return t.name; }).join('/'));
+  ok(BANK.types.filter(function (t) { return t.reveal; }).map(function (t) { return t.id; }).join(',') ===
+    'answer,compute', '解答题和综合计算题标了"看答案"');
+  ok(BANK.settings.examEnabled !== false, '这个科目进模拟考试 (没写"不加入模拟考试")');
+  ok(BANK.settings.blankAuto === true, '设置行写了"填空自动判分"');
+  ok(BANK.settings.randomPick === 15, '"随机抽 15 题"是从题库设置里读的', BANK.settings.randomPick);
+  ok(BANK.sections.length === 4, '四个分节 (练习一~练习四)', BANK.sections.length);
+
+  // 用户核过的答案串: 第 2、7、28 题原卷里两处答案打架, 以这串为准
+  const want = 'bccbacabbdcaccaacccdaccbdccdbd';
+  const got = byType('single').map(function (x) { return 'ABCD'[x.answer].toLowerCase(); }).join('');
+  ok(got === want, '30 道单选的答案与核定答案串一致', got);
+  ok(byId('lx1-2').answer === 2 && byId('lx1-7').answer === 0 && byId('lx1-28').answer === 3,
+    '原卷打架的那三题取的是核定值 (2=C / 7=A / 28=D)',
+    [byId('lx1-2').answer, byId('lx1-7').answer, byId('lx1-28').answer].join('/'));
+
+  ok(byType('single').every(function (x) { return x.options.length === 4 && x.answer != null; }),
+    '单选题都有四个选项 + 答案');
+  ok(byType('single').every(function (x) { return x.options.every(function (o) { return o && o.trim(); }); }),
+    '没有空选项');
+  ok(byType('single').every(function (x) { return x.stem.indexOf('____') > 0; }),
+    '选择题干里的空都在');
+  ok(byType('blank').every(function (x) { return x.sub === 'text' && x.ref && x.ref.trim(); }),
+    '填空题都是文字题, 都有参考答案 (判分就照着它比)');
+  // 第 14 题的空就在句首 ("________ 文件的物理组织形式..."), 所以是 >= 0 不是 > 0
+  ok(byType('blank').every(function (x) { return x.stem.indexOf('____') >= 0; }),
+    '填空题题干里都有空');
+  ok(byType('blank').every(function (x) { return x.options.length === 0 && x.answer === null; }),
+    '填空题没有选项, 也没有 A-D 答案');
+
+  ok(byId('lx2-7').ref === '多级反馈队列算法', '长答案照抄', byId('lx2-7').ref);
+  ok(byId('lx2-19').stem.indexOf('安全环境') > 0, '题干里的引号原样保留', byId('lx2-19').stem);
+  ok(byId('lx1-24').stem.indexOf('整个通路上所有子目录名组成的字符串') > 0,
+    '长题干完整 (选项在中间的那道也一样)', byId('lx1-24').stem);
+
+  // 解答题/综合计算题: 不分对错、值 0 分, 参考答案是多段文字
+  const REVEAL = byType('answer').concat(byType('compute'));
+  ok(REVEAL.every(function (x) { return x.sub === 'reveal' && x.score === 0; }),
+    '看答案的题都标了 reveal 且 0 分',
+    REVEAL.map(function (x) { return x.sub + '/' + x.score; }).filter(function (s) { return s !== 'reveal/0'; }).join(','));
+  ok(REVEAL.every(function (x) { return x.ref && x.ref.trim(); }), '看答案的题都有参考答案');
+  ok(REVEAL.every(function (x) { return x.options.length === 0 && x.answer === null; }),
+    '看答案的题没有选项也没有 A-D 答案');
+  ok(byId('lx3-1').ref.split('\n').length === 2, '两段答案按行存着 (渲染时才分段)',
+    byId('lx3-1').ref.split('\n').length);
+  ok(byId('lx3-10').ref.indexOf('\n- 主要优点：') > 0, '答案里的列表项按行存着');
+  ok(byId('lx4-4').ref.indexOf('\n```c\n') > 0, '代码块用 ``` 包着',
+    JSON.stringify(byId('lx4-4').ref.slice(0, 40)));
+  ok(byId('lx4-4').ref.indexOf('\n    while (1) {') > 0, '代码缩进没被压掉');
+  ok(byId('lx4-3').ref.indexOf('\n| 块 2 |  | 1 |') > 0, '表格行按行存着');
+  ok(byId('lx4-1').stem.indexOf('\n- J1：S2（30ms）') > 0, '综合计算题的题干分了行',
+    JSON.stringify(byId('lx4-1').stem.slice(0, 40)));
+
+  /* ---------- 2. 首页: 只做练习 ---------- */
+  ok(qa('.subject-tab').map(function (x) { return x.textContent; }).join(',') ===
+    '英语,操作系统,数据结构', '三个科目标签',
+    qa('.subject-tab').map(function (x) { return x.textContent; }).join(','));
+  click('[data-subject="操作系统"]');
+  ok(txt('.hero h1') === '操作系统刷题', '切到操作系统', txt('.hero h1'));
+  // 看答案的题不计分, 首页单说一句, 免得"66 题 / 满分 100"看着对不上
+  ok(txt('.hero p') === '单选题 / 填空题 / 解答题 / 综合计算题 · 共 66 题 · 满分 100 分 · 另有 16 题看答案',
+    '首页文案', txt('.hero p'));
+  ok(!!q('[data-action="start-exam"]'), '摆出模拟考试入口');
+  ok(txt('.mode-card.primary .t') === '模拟考试', '模拟考试是主入口', txt('.mode-card.primary .t'));
+  ok(!!q('[data-action="goto-practice"]'), '练习模式还在 (次要入口)');
+  ok(stat(0) === '66' && stat(1) === '0' && stat(2) === '—', '题库总数 / 错题本 / 最近得分',
+    [stat(0), stat(1), stat(2)].join('/'));
+
+  /* ---------- 3. 练习设置: 两个题型各一张卡 ---------- */
+  click('[data-action="goto-practice"]');
+  ok(qa('.type-card').length === 4, '四张题型卡 (没有写作/阅读)', qa('.type-card').length);
+  ok(txt('[data-scope="type:answer"] .t') === '解答题 · 全部 12 题', txt('[data-scope="type:answer"] .t'));
+  ok(txt('[data-scope="type:answer"] .d') === '直接看参考答案 · 不计分',
+    txt('[data-scope="type:answer"] .d'));
+  ok(txt('[data-scope="type:compute"] .t') === '综合计算题 · 全部 4 题',
+    txt('[data-scope="type:compute"] .t'));
+  ok(txt('[data-scope="type:compute"] .d') === '直接看参考答案 · 不计分',
+    txt('[data-scope="type:compute"] .d'));
+  ok(txt('[data-scope="type:single"] .t') === '单选题 · 全部 30 题', txt('[data-scope="type:single"] .t'));
+  ok(txt('[data-scope="type:single"] .d') === '每题 2 分 · 满分 60 分', txt('[data-scope="type:single"] .d'));
+  ok(txt('[data-scope="type:blank"] .t') === '填空题 · 全部 20 题', txt('[data-scope="type:blank"] .t'));
+  ok(txt('[data-scope="type:blank"] .d') === '每题 2 分 · 满分 40 分 · 填完自动判分',
+    txt('[data-scope="type:blank"] .d'));
+
+  /* ---------- 4. 单选题: 答错回显正确答案 ---------- */
+  click('[data-scope="type:single"]');
+  ok(!!q('.qcard'), '进入单选题练习');
+  ok(q('.qcard').getAttribute('data-qid') === 'lx1-1', '从第一题开始',
+    q('.qcard').getAttribute('data-qid'));
+  ok(txt('.qcard .qmeta').indexOf('单选题') === 0, '题头标着题型', txt('.qcard .qmeta'));
+  ok(txt('.qcard .stem').indexOf('接口是') > 0, '题干上屏', txt('.qcard .stem'));
+  const opts = qa('.qcard .option');
+  ok(opts.length === 4, '四个选项', opts.length);
+  click(opts[0]);   // A, 正确答案是 B
+  ok(txt('.qcard .feedback').indexOf('正确答案是 B') >= 0, '判错并回显正确答案',
+    txt('.qcard .feedback'));
+  click('[data-action="next"]');
+  ok(q('.qcard').getAttribute('data-qid') === 'lx1-2', '翻到第 2 题',
+    q('.qcard').getAttribute('data-qid'));
+  ok(qa('.qcard .option').map(function (x) { return x.getAttribute('data-opt'); }).join(',') === '0,1,2,3',
+    '第 2 题的四个选项按 A~D 排好 (没勾选项乱序, 顺序照原卷)',
+    qa('.qcard .option').map(function (x) { return x.getAttribute('data-opt'); }).join(','));
+  ok(txt('.qcard .stem').indexOf('主要作用') > 0, '第 2 题的题干换上了', txt('.qcard .stem'));
+  click('[data-action="exit-session"]');
+
+  /* ---------- 5. 填空题: 提交后自动判分 (拿写的和题库答案比对) ---------- */
+  click('[data-action="goto-practice"]');
+  click('[data-scope="type:blank"]');
+  const c2 = q('.qcard');
+  ok(c2.getAttribute('data-qid') === 'lx2-1', '填空题从第一题开始', c2.getAttribute('data-qid'));
+  ok(!c2.querySelector('.option'), '填空题没有选项按钮');
+  ok(!c2.querySelector('.tl-source'), '填空题没有"原文"框');
+  const ta = c2.querySelector('#tl-input');
+  ok(!!ta, '有写答案的输入框');
+  ok(ta.tagName === 'INPUT', '自动判分的填空是单行输入框 (答案就一两个词)', ta.tagName);
+  ok(ta.placeholder === '写出你的答案...', '提示语是"写出你的答案"', ta.placeholder);
+  ok(!c2.querySelector('#tl-bad'), '没有"我答错了"这种自评按钮');
+  ok(q('#tl-ok').disabled, '没写字之前提交不了');
+  ok(!c2.querySelector('.tl-ref'), '没提交之前不给答案');
+  ok(txt('.qcard .tl-actions .hint') === '填完提交, 和题库答案比对', '说明写着比对',
+    txt('.qcard .tl-actions .hint'));
+  // 故意多打空格、用全角标点、末尾加句号: 归一化之后仍算对
+  typeInto(ta, ' 系统 资源。');
+  ok(!q('#tl-ok').disabled, '写了字就能提交');
+  click('#tl-ok');
+  ok(txt('.qcard .feedback') === '✓ 回答正确', '判对给"回答正确"', txt('.qcard .feedback'));
+  ok(txt('.qcard .tl-ref-head') === '正确答案', '判完给的是"正确答案" (机判, 不再是"参考")',
+    txt('.qcard .tl-ref-head'));
+  ok(txt('.qcard .tl-ref p') === '系统资源', '正确答案的内容', txt('.qcard .tl-ref p'));
+
+  /* ---------- 6. 填空题: 答错进错题本, 正确答案照给 ---------- */
+  click('[data-action="next"]');
+  ok(q('.qcard').getAttribute('data-qid') === 'lx2-2', '翻到填空题第 2 题',
+    q('.qcard').getAttribute('data-qid'));
+  typeInto(q('.qcard #tl-input'), '资源共享');
+  click('#tl-ok');
+  ok(txt('.qcard .feedback') === '✗ 回答错误, 已记入错题本', '答错提示', txt('.qcard .feedback'));
+  ok(txt('.qcard .tl-ref p') === '资源共享性', '答错也给正确答案', txt('.qcard .tl-ref p'));
+
+  /* ---------- 6b. 大小写/全角也不算错 (第 8 题的答案是 CPU) ---------- */
+  for (let i = 0; i < 6; i++) click('[data-action="next"]');
+  ok(q('.qcard').getAttribute('data-qid') === 'lx2-8', '翻到第 8 题', q('.qcard').getAttribute('data-qid'));
+  const ta8 = q('.qcard #tl-input');
+  typeInto(ta8, 'ｃｐｕ');
+  ta8.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  ok(txt('.qcard .feedback') === '✓ 回答正确', '全角小写的 ＣＰＵ 也算对 (回车直接提交)',
+    txt('.qcard .feedback'));
+  ok(txt('.qcard .tl-ref p') === 'CPU', '题库答案是 CPU', txt('.qcard .tl-ref p'));
+  click('[data-action="exit-session"]');
+
+  /* ---------- 7. 错题本: 两道题, 隔离在操作系统这边 ---------- */
+  // 退出练习本来就落在首页, 不用再点一次 home
+  ok(stat(1) === '2', '两道错题都进了错题本 (单选/填空各一)', stat(1));
+  click('[data-action="open-wrongbook"]');
+  const items = qa('.review-item');
+  ok(items.length === 2, '错题本两题', items.length);
+  // 自动判分的填空错题现在也说"正确答案", 所以靠"上次"这一行认选择题
+  const single = items.filter(function (x) { return x.textContent.indexOf('上次: ') >= 0; })[0];
+  ok(!!single && single.textContent.indexOf('正确答案: ') >= 0, '选择题错题给"正确答案"和"上次"');
+  ok(!!single && single.textContent.indexOf('系统调用') >= 0, '正确答案是 B 的系统调用',
+    single && single.textContent.slice(0, 60));
+  const blank = items.filter(function (x) { return x.textContent.indexOf('资源共享性') >= 0; })[0];
+  ok(!!blank && blank.textContent.indexOf('正确答案: 资源共享性') >= 0, '填空错题给正确答案',
+    blank && blank.textContent.slice(0, 60));
+  ok(!!blank && blank.textContent.indexOf('上次') < 0, '填空题错题不说"上次" (没有选项下标可记)');
+
+  /* ---------- 8. 解答题: 参考答案直接摊开, 不用作答 ---------- */
+  click('[data-action="home"]');
+  click('[data-action="goto-practice"]');
+  click('[data-scope="type:answer"]');
+  const rv = q('.qcard');
+  ok(rv.getAttribute('data-qid') === 'lx3-1', '解答题从第一题开始', rv.getAttribute('data-qid'));
+  ok(txt('.qcard .qmeta').indexOf('解答题') === 0 && txt('.qcard .qmeta').indexOf('分') < 0,
+    '题头不写"0 分"', txt('.qcard .qmeta'));
+  ok(!rv.querySelector('.option'), '没有选项');
+  ok(!rv.querySelector('#tl-input'), '没有输入框');
+  ok(!rv.querySelector('#tl-ok') && !rv.querySelector('#tl-bad'), '没有自评按钮');
+  ok(txt('.qcard .tl-ref-head') === '参考答案', '参考答案当场就在', txt('.qcard .tl-ref-head'));
+  ok(qa('.qcard .tl-ref .rich p').length === 2, '两段话渲染成两段', qa('.qcard .tl-ref .rich p').length);
+  ok(txt('.qcard .tl-ref p').indexOf('用户态和内核态') > 0, '答案的内容', txt('.qcard .tl-ref p').slice(0, 30));
+  click('[data-action="next"]');
+  ok(q('.qcard').getAttribute('data-qid') === 'lx3-2', '翻到下一题', q('.qcard').getAttribute('data-qid'));
+  ok(txt('.qcard .tl-ref p').indexOf('异步特征') > 0, '换题也跟着换答案');
+  click('[data-action="prev"]');
+  ok(q('.qcard').getAttribute('data-qid') === 'lx3-1', '还能翻回去');
+  click('[data-action="exit-session"]');
+
+  /* ---------- 9. 综合计算题: 题干分行, 表格和代码块都渲染出来 ---------- */
+  click('[data-action="goto-practice"]');
+  click('[data-scope="type:compute"]');
+  ok(q('.qcard').getAttribute('data-qid') === 'lx4-1', '综合计算题从第一题开始');
+  ok(qa('.qcard .stem-lines p').length === 8, '题干一行一段 (3 个作业 + 说明 + 3 个小问 + 首行)',
+    qa('.qcard .stem-lines p').length);
+  ok(txt('.qcard .stem-lines p:nth-child(2)') === '- J1：S2（30ms），CPU（10ms），S1（30ms），CPU（10ms），S2（20ms）',
+    '作业那几行原样摆着', txt('.qcard .stem-lines p:nth-child(2)'));
+  ok(qa('.qcard .tl-ref .rich-list li').length === 3, '答案里的 3 条分块渲染成列表',
+    qa('.qcard .tl-ref .rich-list li').length);
+
+  click('[data-action="next"]');
+  click('[data-action="next"]');
+  ok(q('.qcard').getAttribute('data-qid') === 'lx4-3', '翻到 LRU 那道', q('.qcard').getAttribute('data-qid'));
+  const tbl = q('.qcard .rich-table');
+  ok(!!tbl, 'LRU 表渲染成真表格');
+  ok(qa('.qcard .rich-table thead th').length === 11, '表头 11 列',
+    qa('.qcard .rich-table thead th').length);
+  ok(qa('.qcard .rich-table tbody tr').length === 4, '表体 4 行 (块 1/2/3 + 置换标志)',
+    qa('.qcard .rich-table tbody tr').length);
+  ok(txt('.qcard .rich-table tbody tr:last-child td:last-child') === '+', '置换标志最后一个是 +',
+    txt('.qcard .rich-table tbody tr:last-child td:last-child'));
+  ok(qa('.qcard .rich-table tbody tr:nth-child(2) td')[1].textContent === '', '空着的那格就是空的',
+    JSON.stringify(qa('.qcard .rich-table tbody tr:nth-child(2) td')[1].textContent));
+
+  click('[data-action="next"]');
+  ok(q('.qcard').getAttribute('data-qid') === 'lx4-4', '翻到信号量那道');
+  const code = q('.qcard .rich-code');
+  ok(!!code, '代码块渲染成 <pre>');
+  ok(code.textContent.indexOf('Semaphore empty = M, full = 0, mutex = 1;') === 0, '代码第一行',
+    code.textContent.slice(0, 30));
+  ok(code.textContent.indexOf('\n    while (1) {') > 0, '代码缩进留着', JSON.stringify(code.textContent.slice(0, 60)));
+  ok(code.textContent.indexOf('```') < 0, '围栏没留在代码里');
+  ok(!!q('[data-action="finish-practice"]'), '最后一题给出"完成练习"');
+
+  /* ---------- 10. 看答案的练习: 不计分、不进错题本 ---------- */
+  click('[data-action="finish-practice"]');
+  ok(txt('.score-num') === '4 题', '没有分可算, 成绩单报题数', txt('.score-num'));
+  ok(txt('.score-sub').indexOf('看参考答案') > 0, '说明写着看参考答案', txt('.score-sub'));
+  ok(txt('.score-sub').indexOf('得分率') < 0, '不算得分率');
+  ok([].map.call(document.querySelectorAll('.score-detail b'), function (b) { return b.textContent; }).join('/')
+    === '0/0/0/4', '明细只有一看答案 4',
+    [].map.call(document.querySelectorAll('.score-detail b'), function (b) { return b.textContent; }).join('/'));
+  ok(qa('.review-item.view').length === 4, '回顾里 4 条看答案', qa('.review-item.view').length);
+  ok(txt('.review-item.view .tag') === '看答案', '回顾里标着"看答案"');
+  ok(txt('.review-item.view .qmeta').indexOf('综合计算题') === 0, '回顾里题型对得上');
+  ok(!!q('.review-item.view .rich-table'), '回顾里表格照样渲染');
+  ok(txt('[data-action="practice-wrong-now"]') === '只做错题 (0)', '看答案的题不算错题',
+    txt('[data-action="practice-wrong-now"]'));
+
+  click('[data-action="home"]');
+  ok(stat(1) === '2', '看答案没往错题本里塞东西', stat(1));
+  ok(stat(2) === '—', '看答案的练习不算"最近得分"', stat(2));
+  ok(txt('.history-item .score') === '看答案 4 题', '历史记录写"看答案 4 题"',
+    txt('.history-item .score'));
+
+  /* ---------- 11. 别的科目没被带跑 ---------- */
+  click('[data-subject="数据结构"]');
+  ok(txt('.hero p') === '单选题 / 填空题 / 名词解释 · 共 49 题 · 满分 78 分 · 另有 10 题看答案',
+    '数据结构题库没变 (名词解释也是看答案的题, 不计分)', txt('.hero p'));
+  ok(stat(0) === '49' && stat(1) === '0', '数据结构的错题本没被污染', stat(0) + '/' + stat(1));
+  click('[data-subject="english"]');
+  ok(txt('.hero p') === '单选题 / 阅读理解 / 单句翻译 · 共 104 题 · 满分 180 分',
+    '英语题库没被带跑', txt('.hero p'));
+  ok(stat(0) === '104' && stat(1) === '0', '英语错题本没被污染', stat(0) + '/' + stat(1));
+  ok(!!q('[data-action="start-exam"]'), '英语的模拟考试入口还在');
+
+  } catch (err) {
+    ok(false, '用例执行没抛异常', err && (err.message + ' | ' + String(err.stack || '').split('\n')[1]));
+  }
+
+  /* ---------- 结果 ---------- */
+  out.unshift('共 ' + (pass + fail) + ' 条, 通过 ' + pass + ', 失败 ' + fail);
+  const pre = document.createElement('pre');
+  pre.id = 'out';
+  pre.textContent = out.join('\n');
+  document.body.appendChild(pre);
+})();
+</script>
+</body>
+</html>
